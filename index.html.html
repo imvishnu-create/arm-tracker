@@ -1,0 +1,467 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>7-Day Arm Specialization Tracker</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7fafc; /* Light gray background */
+            /* Added for mobile: Ensure body takes up the full height of the viewport */
+            min-height: 100vh;
+        }
+        .exercise-card-done {
+            background-color: #d1fae5; /* Light green for done */
+            border-left: 6px solid #10b981; /* Green border */
+            opacity: 0.8;
+        }
+        .exercise-card-pending {
+            background-color: #ffffff; /* White for pending */
+            border-left: 6px solid #f97316; /* Orange border */
+        }
+    </style>
+    <!-- Firebase Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables must be defined, even if the user hasn't provided the keys yet
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        
+        // --- Check if __firebase_config is defined AND not an empty string before parsing ---
+        const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) 
+            ? JSON.parse(__firebase_config) 
+            : null;
+        
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db = null;
+        let auth = null;
+        let userId = null;
+
+        /**
+         * Converts date to YYYY-MM-DD format.
+         * @param {Date} date
+         * @returns {string}
+         */
+        const formatDate = (date) => date.toISOString().split('T')[0];
+
+        /**
+         * Initializes Firebase and authenticates the user.
+         */
+        async function initializeFirebase() {
+            // This is where the error message is triggered if Firebase is not configured.
+            if (!firebaseConfig) {
+                console.error("Firebase configuration is missing.");
+                // Update the container to show the error message
+                const container = document.getElementById('routine-container');
+                if (container) {
+                    container.innerHTML = '<p class="text-red-600 text-center p-4">Error: Firebase configuration is missing. Tracking is disabled.</p>';
+                }
+                
+                // Still need to call renderApp so the routine content displays
+                window.renderApp(false); 
+                return;
+            }
+
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('Debug');
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                userId = auth.currentUser?.uid || crypto.randomUUID();
+                console.log("Firebase initialized and user signed in:", userId);
+
+                // Expose auth object for use in renderApp
+                window.auth = auth;
+
+                // Start rendering the app after auth is ready
+                window.renderApp(true); // Pass true to indicate successful auth
+
+            } catch (error) {
+                console.error("Firebase Initialization or Sign-In Error:", error);
+                const container = document.getElementById('routine-container');
+                if (container) {
+                    container.innerHTML = '<p class="text-red-600 text-center p-4">Error initializing tracking services. Please check console.</p>';
+                }
+                window.renderApp(false); 
+            }
+        }
+
+        /**
+         * Gets the Firestore document path for today's progress.
+         * @returns {import("firebase/firestore").DocumentReference}
+         */
+        const getProgressDocRef = () => {
+            if (!db || !userId) throw new Error("Database or User ID not initialized.");
+            const todayDate = formatDate(new Date());
+            // Path: /artifacts/{appId}/users/{userId}/exercise_tracker/{date}
+            return doc(db, 'artifacts', appId, 'users', userId, 'exercise_tracker', todayDate);
+        };
+
+        /**
+         * Loads the completion status for today's exercises.
+         * @returns {Promise<Object>} Object mapping exercise name to completion status (boolean).
+         */
+        async function loadProgress() {
+            try {
+                const docRef = getProgressDocRef();
+                const docSnap = await getDoc(docRef);
+
+                if (docSnap.exists()) {
+                    return docSnap.data().exercises || {};
+                }
+                return {};
+            } catch (error) {
+                console.error("Error loading progress:", error);
+                return {};
+            }
+        }
+
+        /**
+         * Saves the completion status for a specific exercise.
+         * @param {string} exerciseName
+         * @param {boolean} isCompleted
+         */
+        async function saveProgress(exerciseName, isCompleted) {
+            try {
+                const docRef = getProgressDocRef();
+                
+                // Use a nested object structure to update only the specific exercise status
+                const updateData = {
+                    exercises: {
+                        [exerciseName]: isCompleted
+                    }
+                };
+
+                // Use setDoc with merge: true to avoid overwriting the entire document
+                await setDoc(docRef, updateData, { merge: true });
+                console.log("Progress saved successfully for:", exerciseName);
+            } catch (error) {
+                console.error("Error saving progress:", error);
+            }
+        }
+
+        // Expose functions to the global scope for use in the main script block
+        window.saveProgress = saveProgress;
+        window.loadProgress = loadProgress;
+        window.formatDate = formatDate;
+        window.isFirebaseReady = false; // Flag to track readiness
+        window.auth = null; // Expose auth object
+
+        // --- Start the App ---
+        initializeFirebase(); 
+    </script>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl font-extrabold text-orange-600 mb-2">🏆 Arm Specialization Routine</h1>
+            <p class="text-gray-500 font-medium text-lg">7-Day Tracking & Pull-Up Prep</p>
+            <div id="auth-status" class="text-sm text-gray-400 mt-2">Loading tracker...</div>
+        </header>
+
+        <!-- Day Selector Tabs -->
+        <nav id="day-tabs" class="flex flex-wrap justify-center space-x-2 md:space-x-4 mb-8 p-2 bg-white shadow-lg rounded-xl sticky top-0 z-10 border-b-4 border-orange-500"></nav>
+
+        <!-- Routine Display -->
+        <main id="routine-container" class="space-y-6">
+            <div class="text-center p-8">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+                <p class="mt-4 text-gray-600">Loading routine data and connecting to tracker...</p>
+            </div>
+        </main>
+
+        <footer class="text-center mt-12 text-sm text-gray-400">
+            <p>Remember to maintain strict form and control the negative phase of each rep!</p>
+        </footer>
+    </div>
+
+   
+    <script>
+        // --- Routine Data based on User Input ---
+        const ROUTINE_DATA = {
+            "Monday": [
+                { name: "Dumbbell Floor Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Chest and Triceps", detail: "Lower the dumbbells slowly until your upper arms touch the floor. Explosively press straight up." },
+                { name: "Banded Push-ups", sets: 3, reps: "AMRAP", equipment: "Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Loop band across upper back. Lower your chest (controlled) and explosively press up." },
+                { name: "Seated Dumbbell Shoulder Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Anterior and Medial Deltoids", detail: "Sit tall. Press dumbbells directly overhead until arms are fully extended. Control the descent." },
+                { name: "Dumbbell Lateral Raises", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Medial (Side) Deltoid", detail: "Raise arms out to the sides until they are parallel to the floor. Slowly lower." },
+                { name: "Dumbbell Close-Grip Floor Press", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Inner Chest and Triceps", detail: "Lower the dumbbells with your elbows tucked tightly against your sides. Press straight up." },
+                { name: "Seated Dumbbell Triceps Extension", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Long head of the Triceps", detail: "Lower the dumbbell behind your head by bending only at the elbows. Extend arms fully overhead." },
+                { name: "Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back for a peak squeeze." },
+                { name: "Plank", sets: 3, reps: "60 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Maintain a straight line from head to heels. Brace your abs tightly." },
+            ],
+            "Tuesday": [
+                { name: "Dumbbell Bent-Over Row", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Lats and Upper Back", detail: "Hinge at hips. Pull dumbbells toward your chest, driving your elbows past your torso, squeezing your back." },
+                { name: "Dumbbell Single-Arm Row", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lats, Upper Back, and Core stability", detail: "Use support. Pull the dumbbell to your side. Lower it slowly." },
+                { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids and Rotator Cuff", detail: "Pull the band toward your face, driving your elbows back and out. Squeeze your shoulder blades." },
+                { name: "Dumbbell Reverse Fly", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Rear Deltoids and Upper Back", detail: "Hinge at hips. Lift arms out to the sides in a wide arc, squeezing your shoulder blades together." },
+                { name: "Dumbbell Shrugs", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Upper Trapezius (Traps)", detail: "Shrug your shoulders straight up toward your ears. Lower them slowly." },
+                { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "Curl the weights toward your shoulders, keeping your elbows pinned to your sides. Squeeze at the top.", superset: true },
+                { name: "A2: Hammer Curls", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
+                { name: "Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Sit, lean forward. Curl the weight up slowly, focusing entirely on flexing the bicep." },
+                { name: "Timed Dumbbell Holds", sets: 2, reps: "45-60 sec", equipment: "Dumbbells (10kg set)", focus: "Static Grip Strength", detail: "Simply hold the dumbbells straight down by your side for the specified duration." },
+                { name: "Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Flexion (Forearm Flexors)", detail: "Palms up. Sit, rest forearms on knees/bench. Let wrist drop fully, then curl weight up toward the ceiling." },
+                { name: "Reverse Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Extension (Forearm Extensors)", detail: "Palms down. Sit, rest forearms on knees/bench. Let wrist drop fully, then curl weight up toward the ceiling." },
+            ],
+            "Wednesday": [
+                { name: "Plank", sets: 3, reps: "60-90 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Maintain a straight line from head to heels. Brace your abs tightly." },
+                { name: "Russian Twists", sets: 3, reps: "15-20 (ea. side)", equipment: "Bodyweight/Dumbbells", focus: "Obliques", detail: "Sit, lean back slightly, and twist your torso to tap the floor on each side." },
+                { name: "Side Plank", sets: 3, reps: "30-45 sec (ea. side)", equipment: "Bodyweight", focus: "Obliques", detail: "Keep your body in a perfectly straight line." },
+                { name: "Leg Raises", sets: 3, reps: "15-20", equipment: "Bodyweight", focus: "Lower Abdominals", detail: "Raise your legs to perpendicular, then lower them slowly." },
+            ],
+            "Thursday": [
+                { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "Curl the weights toward your shoulders, keeping your elbows pinned. Squeeze at the top.", superset: true },
+                { name: "A2: Long Band Overhead Triceps Ext", sets: 4, reps: "12-15", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Lower hands behind head (standing on band). Powerfully extend arms to the ceiling.", superset: true },
+                { name: "B1: Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Sit, lean forward. Curl up slowly, focusing on flexing the bicep. Control the negative.", superset: true },
+                { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lower dumbbells toward temples/forehead, then extend back up.", superset: true },
+                { name: "C1: Hammer Curls", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
+                { name: "C2: Dumbbell Triceps Kickbacks", sets: 3, reps: "12-15 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back for a peak squeeze.", superset: true },
+                { name: "D1: Dumbbell Zottman Curl", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Biceps, Brachialis, and Forearms", detail: "Curl up (palms up). Rotate palms down. Slowly lower (palms down).", superset: true },
+                { name: "D2: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Curl the weights up, focusing on forearm tension.", superset: true },
+                { name: "Finisher A: Hand Gripper Squeeze", sets: 3, reps: "12-15 (ea. hand)", equipment: "Hand Gripper", focus: "Crush Grip Strength", detail: "Squeeze the handles together forcefully. Control the release." },
+                { name: "Finisher B: Dumbbell Rotations", sets: 3, reps: "15-20 (ea. arm)", equipment: "Dumbbell (5kg set)", focus: "Wrist Stabilizers", detail: "Hold dumbbell vertically (hammer grip). Slowly rotate thumb toward and away from your body." },
+                { name: "Finisher C: Farmer's Walk (Grip)", sets: 2, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip Strength and Forearms", detail: "Hold heavy dumbbells and walk for the specified duration." },
+            ],
+            "Friday": [
+                { name: "Dumbbell Goblet Squats", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Quads and Glutes", detail: "Squat down, keeping your chest up and driving your knees out." },
+                { name: "Dumbbell Lunges (each leg)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Quads, Glutes, and Stability", detail: "Step forward and lower your hips until both knees are bent at a 90-degree angle." },
+                { name: "Dumbbell Calf Raises", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Calves", detail: "Raise yourself up onto the balls of your feet, squeezing your calves hard at the top." },
+                { name: "Dumbbell Pullovers", sets: 3, reps: "10-12", equipment: "Dumbbell & Bench/Surface", focus: "Lats (Overhead Pull Simulation)", detail: "Lie on your back (perpendicular to a bench/stable surface). Lower dumbbell slowly behind your head, feeling a deep stretch in the lats. Pull it back up using your lats." },
+                { name: "Band Lateral Raises", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Medial (Side) Deltoid", detail: "Raise arms out to the sides until parallel to the floor, leading with the elbows. Control the band's return." },
+                { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids", detail: "Pull the band toward your face, driving your elbows back and out." },
+                { name: "Banded Push-ups", sets: 2, reps: "AMRAP", equipment: "Long Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Lower your chest (controlled) and explosively press up." },
+                { name: "Dumbbell Shrugs", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Trapezius", detail: "Shrug your shoulders straight up toward your ears." },
+            ],
+            "Saturday": [
+                { name: "A1: Alternating Dumbbell Bicep Curls", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Biceps (Full Contraction)", detail: "Curl one dumbbell at a time. Focus on the peak contraction and a controlled negative.", superset: true },
+                { name: "A2: Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back until fully locked out for a peak squeeze.", superset: true },
+                { name: "B1: Hammer Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
+                { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lowering the dumbbells toward your temples/forehead, then extend back up.", superset: true },
+                { name: "C1: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Curl the weights up, focusing on the tension in your forearms and keeping the movement controlled.", superset: true },
+                { name: "C2: Long Band Overhead Triceps Ext", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Lower your hands behind your head (standing on band). Powerfully extend your arms to the ceiling.", superset: true },
+                { name: "Finisher: Farmer's Walk (Grip)", sets: 3, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip strength and Forearms", detail: "Hold heavy dumbbells and walk for the specified duration." },
+            ],
+            "Sunday": [
+                { name: "Rest", sets: 1, reps: "Full Day", equipment: "None", focus: "Recovery", detail: "Complete Rest or Active Recovery (Light walking, stretching). No heavy lifting." }
+            ]
+        };
+
+        let currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+        let dailyProgress = {};
+
+        /**
+         * Renders the tab navigation buttons.
+         */
+        function renderTabs() {
+            const days = Object.keys(ROUTINE_DATA);
+            const tabsContainer = document.getElementById('day-tabs');
+            tabsContainer.innerHTML = '';
+
+            const todayLong = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+
+            days.forEach(day => {
+                const isSelected = day === currentDay;
+                const isToday = day === todayLong;
+                
+                const button = document.createElement('button');
+                button.textContent = day;
+                button.className = `py-2 px-4 rounded-full font-semibold transition-colors duration-200 shadow-sm text-sm md:text-base ${
+                    isSelected
+                        ? 'bg-orange-600 text-white shadow-md shadow-orange-300'
+                        : isToday
+                            ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`;
+                button.onclick = () => {
+                    currentDay = day;
+                    renderRoutine();
+                    renderTabs(); // Re-render to update the active state
+                };
+                tabsContainer.appendChild(button);
+            });
+        }
+
+        /**
+         * Renders the routine details for the selected day.
+         * @param {boolean} isReady - True if Firebase is initialized.
+         */
+        async function renderRoutine() {
+            const container = document.getElementById('routine-container');
+            container.innerHTML = '';
+            const exercises = ROUTINE_DATA[currentDay] || [];
+
+            // 1. Load progress for the current day, only if Firebase is ready
+            if (window.isFirebaseReady && window.loadProgress) {
+                // Remove the spinner and show "Loading progress..." before the actual data loads
+                container.innerHTML = `
+                    <div class="text-center p-8">
+                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+                        <p class="mt-4 text-gray-600">Loading progress...</p>
+                    </div>
+                `;
+                dailyProgress = await window.loadProgress();
+                container.innerHTML = ''; // Clear loading state once data is fetched
+
+            } else {
+                dailyProgress = {}; // Cannot load, use empty state
+                // If not ready, we rely on the initial loading message until the promise resolves.
+                // If the promise failed, initializeFirebase updates the error status.
+            }
+
+            // 2. Add current day title and date
+            const dateDisplay = document.createElement('p');
+            dateDisplay.className = 'text-center text-gray-500 font-medium mb-4';
+            if (currentDay === new Date().toLocaleDateString('en-US', { weekday: 'long' })) {
+                dateDisplay.textContent = `Today is ${currentDay}: ${window.formatDate(new Date())}`;
+            } else {
+                dateDisplay.textContent = `${currentDay} Routine`;
+            }
+            container.appendChild(dateDisplay);
+
+
+            // 3. Render exercises
+            exercises.forEach((ex, index) => {
+                const isCompleted = dailyProgress[ex.name] || false;
+                
+                const card = document.createElement('div');
+                card.id = `ex-${index}`;
+                card.className = `p-4 md:p-6 rounded-xl shadow-md transition-all duration-300 ${isCompleted ? 'exercise-card-done' : 'exercise-card-pending'} flex flex-col sm:flex-row justify-between items-start sm:items-center`;
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'flex-grow mb-4 sm:mb-0';
+
+                const nameEl = document.createElement('h3');
+                nameEl.className = `text-xl font-bold ${isCompleted ? 'text-green-800' : 'text-gray-800'} flex items-center`;
+                nameEl.innerHTML = `${ex.name} ${ex.superset ? '<span class="ml-2 text-xs bg-orange-200 text-orange-700 px-2 py-0.5 rounded-full font-medium">Superset</span>' : ''}`;
+
+                const detailEl = document.createElement('p');
+                detailEl.className = 'text-gray-500 text-sm italic mt-1';
+                detailEl.textContent = ex.detail;
+
+                const metaDiv = document.createElement('div');
+                metaDiv.className = 'mt-2 text-sm space-y-1';
+                metaDiv.innerHTML = `
+                    <p class="text-gray-600"><strong class="text-gray-700">Sets:</strong> ${ex.sets} | <strong class="text-gray-700">Reps:</strong> ${ex.reps}</p>
+                    <p class="text-gray-600"><strong class="text-gray-700">Equipment:</strong> ${ex.equipment}</p>
+                    <p class="text-gray-600"><strong class="text-gray-700">Focus:</strong> ${ex.focus}</p>
+                `;
+
+                contentDiv.appendChild(nameEl);
+                contentDiv.appendChild(metaDiv);
+                contentDiv.appendChild(detailEl);
+
+                card.appendChild(contentDiv);
+
+                // Checkbox for completion
+                if (currentDay !== 'Sunday') { // No tracking needed for rest day
+                    const checkboxDiv = document.createElement('div');
+                    checkboxDiv.className = 'flex-shrink-0';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = isCompleted;
+                    checkbox.className = 'h-6 w-6 text-orange-600 rounded border-gray-300 focus:ring-orange-500 cursor-pointer';
+                    checkbox.disabled = !window.isFirebaseReady; // Disable if tracking is unavailable
+                    checkbox.onchange = (e) => toggleCompletion(ex.name, e.target.checked, card);
+
+                    const label = document.createElement('label');
+                    label.className = `inline-flex items-center space-x-2 p-2 rounded-lg bg-gray-50 transition duration-150 ${window.isFirebaseReady ? 'hover:bg-gray-100 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
+                    label.innerHTML = `<span class="text-sm font-medium ${isCompleted ? 'text-green-700' : 'text-gray-600'}">${isCompleted ? 'Completed!' : 'Mark Done'}</span>`;
+                    label.prepend(checkbox);
+
+                    checkboxDiv.appendChild(label);
+                    card.appendChild(checkboxDiv);
+                } else {
+                    // Styling for Rest Day
+                    card.classList.remove('exercise-card-pending');
+                    card.classList.add('bg-blue-100', 'border-blue-400', 'border-l-6');
+                    nameEl.classList.remove('text-gray-800');
+                    nameEl.classList.add('text-blue-800');
+                }
+
+                container.appendChild(card);
+            });
+        }
+
+        /**
+         * Toggles the completion status and updates Firestore.
+         * @param {string} name - Exercise name.
+         * @param {boolean} isCompleted - New status.
+         * @param {HTMLElement} cardEl - The card element to update visually.
+         */
+        function toggleCompletion(name, isCompleted, cardEl) {
+            // Update local state immediately for fast UI feedback
+            dailyProgress[name] = isCompleted;
+            
+            // Visual update logic
+            const nameEl = cardEl.querySelector('h3');
+            const labelSpan = cardEl.querySelector('label span');
+
+            if (isCompleted) {
+                cardEl.classList.remove('exercise-card-pending', 'bg-white');
+                cardEl.classList.add('exercise-card-done');
+                if (nameEl) {
+                    nameEl.classList.remove('text-gray-800');
+                    nameEl.classList.add('text-green-800');
+                }
+                if (labelSpan) labelSpan.textContent = 'Completed!';
+
+            } else {
+                cardEl.classList.remove('exercise-card-done');
+                cardEl.classList.add('exercise-card-pending', 'bg-white');
+                if (nameEl) {
+                    nameEl.classList.remove('text-green-800');
+                    nameEl.classList.add('text-gray-800');
+                }
+                if (labelSpan) labelSpan.textContent = 'Mark Done';
+            }
+
+            // Save to Firestore (async)
+            if (window.saveProgress) {
+                window.saveProgress(name, isCompleted);
+            }
+        }
+
+        /**
+         * Main function to start the application after Firebase is ready.
+         * @param {boolean} isAuthenticated - Whether Firebase initialized successfully.
+         */
+        window.renderApp = (isAuthenticated = false) => {
+            window.isFirebaseReady = isAuthenticated;
+            const todayLong = new Date().toLocaleDateString('en-US', { weekday: 'long' });
+            
+            // Set the initial day to today
+            currentDay = todayLong;
+            
+            // Update Auth Status display
+            const authStatus = document.getElementById('auth-status');
+            
+            if (isAuthenticated && window.auth && window.auth.currentUser) {
+                const userId = window.auth.currentUser.uid;
+                authStatus.innerHTML = `Tracker <strong class="text-green-600">Active</strong> (User ID: <code class="bg-gray-200 p-1 rounded text-xs font-mono">${userId}</code>)`;
+            } else {
+                authStatus.innerHTML = `Tracker <strong class="text-red-500">Disabled</strong>. Progress will not be saved.`;
+            }
+            
+            renderTabs();
+            renderRoutine();
+        };
+
+    </script>
+</body>
+</html>
