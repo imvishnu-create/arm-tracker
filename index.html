@@ -40,11 +40,11 @@
         import { getFirestore, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Global variables must be defined, even if the user hasn't provided the keys yet
+        // Global variables are provided by the Canvas environment for secure operation.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         
         // --- Check if __firebase_config is defined AND not an empty string before parsing ---
-        const firebaseConfig = (typeof __firebase_config !== 'undefined' && __firebase_config) 
+        const firebaseConfigFromCanvas = (typeof __firebase_config !== 'undefined' && __firebase_config) 
             ? JSON.parse(__firebase_config) 
             : null;
         
@@ -53,6 +53,21 @@
         let db = null;
         let auth = null;
         let userId = null;
+
+
+        /* * --- IMPORTANT: GUIDE FOR EXTERNAL HOSTING ---
+         * If you run this file directly in a browser (outside the Canvas),
+         * the Tracker is disabled because Firebase credentials are not available.
+         * * To enable tracking on your own website, you must:
+         * 1. Create your own **Firebase Project** (or use an existing one).
+         * 2. Replace the 'null' below with your actual Firebase config object:
+         * Example: { apiKey: "AIza...", authDomain: "...", projectId: "...", ... }
+         * (Get this config from your Firebase project settings).
+        */
+        const CUSTOM_FIREBASE_CONFIG = null; // <<< PASTE YOUR CONFIG OBJECT HERE IF SELF-HOSTING
+
+        const firebaseConfig = firebaseConfigFromCanvas || CUSTOM_FIREBASE_CONFIG;
+        
 
         /**
          * Converts date to YYYY-MM-DD format.
@@ -67,11 +82,11 @@
         async function initializeFirebase() {
             // This is where the error message is triggered if Firebase is not configured.
             if (!firebaseConfig) {
-                console.error("Firebase configuration is missing.");
+                console.warn("Firebase configuration is missing. Tracking will only be session-based (progress will not be saved).");
                 // Update the container to show the error message
                 const container = document.getElementById('routine-container');
                 if (container) {
-                    container.innerHTML = '<p class="text-red-600 text-center p-4">Error: Firebase configuration is missing. Tracking is disabled.</p>';
+                    container.innerHTML = '<p class="text-orange-600 text-center p-4">Warning: Persistent tracking is disabled. Progress will only be saved for this session.</p>';
                 }
                 
                 // Still need to call renderApp so the routine content displays
@@ -85,9 +100,13 @@
                 auth = getAuth(app);
                 setLogLevel('Debug');
 
+                // --- Authentication Strategy: Use Canvas Token if available, otherwise Anonymous Sign-in ---
                 if (initialAuthToken) {
+                    // Used in the secure Canvas environment
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
+                    // Fallback to anonymous sign-in for external or locally hosted apps
+                    // NOTE: This requires your own Firebase project configured in CUSTOM_FIREBASE_CONFIG
                     await signInAnonymously(auth);
                 }
                 
@@ -392,8 +411,8 @@
 
                     const label = document.createElement('label');
                     label.htmlFor = `check-${index}`;
-                    // Styled as a large, easy-to-tap button/label
-                    label.className = `flex items-center justify-center space-x-2 py-3 px-6 rounded-xl font-bold transition duration-150 shadow-md w-full ${window.isFirebaseReady ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
+                    // Changed: Removed the 'opacity-50 cursor-not-allowed' class dependency on Firebase readiness
+                    label.className = `flex items-center justify-center space-x-2 py-3 px-6 rounded-xl font-bold transition duration-150 shadow-md w-full cursor-pointer`;
                     
                     if (isCompleted) {
                         label.classList.add('bg-green-600', 'text-white', 'hover:bg-green-700');
@@ -403,12 +422,9 @@
                         label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
                     }
                     
-                    label.onclick = (e) => {
-                        // Prevent the label click from immediately triggering the checkbox change
-                        if (!window.isFirebaseReady) {
-                            e.preventDefault();
-                            return;
-                        }
+                    label.onclick = () => {
+                        // Changed: Removed e.preventDefault() and return; based on Firebase status.
+                        // Now the button always calls toggleCompletion.
                         const newStatus = !checkbox.checked;
                         toggleCompletion(ex.name, newStatus, card, checkbox, label);
                     };
@@ -468,9 +484,11 @@
                 labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
             }
 
-            // 3. Save to Firestore (async)
-            if (window.saveProgress) {
+            // 3. Save to Firestore (async) - NOW ONLY RUNS IF isFirebaseReady is TRUE
+            if (window.isFirebaseReady && window.saveProgress) {
                 window.saveProgress(name, isCompleted);
+            } else {
+                console.log(`[Session Tracking Active] Toggled ${name} to ${isCompleted}. Persistent save is disabled.`);
             }
         }
 
@@ -492,7 +510,8 @@
                 const userId = window.auth.currentUser.uid;
                 authStatus.innerHTML = `Tracker <strong class="text-green-600">Active</strong> (User ID: <code class="bg-gray-200 p-1 rounded text-xs font-mono">${userId}</code>)`;
             } else {
-                authStatus.innerHTML = `Tracker <strong class="text-red-500">Disabled</strong>. Progress will not be saved.`;
+                // Modified status message to reflect that session tracking is now enabled
+                authStatus.innerHTML = `Tracker <strong class="text-red-500">Disabled</strong>. Progress is only saved for the current session.`;
             }
             
             renderTabs();
