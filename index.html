@@ -10,18 +10,27 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7fafc; /* Light gray background */
-            /* Added for mobile: Ensure body takes up the full height of the viewport */
+            background-color: #e5e7eb; /* Slightly darker light gray background */
             min-height: 100vh;
         }
         .exercise-card-done {
-            background-color: #d1fae5; /* Light green for done */
-            border-left: 6px solid #10b981; /* Green border */
-            opacity: 0.8;
+            background-color: #ecfdf5; /* Very light mint green */
+            border-left: 6px solid #059669; /* Stronger green border */
+            opacity: 0.95;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
         .exercise-card-pending {
-            background-color: #ffffff; /* White for pending */
+            background-color: #ffffff; /* Crisp white for pending */
             border-left: 6px solid #f97316; /* Orange border */
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+        }
+        /* Custom scrollbar for better mobile tab experience */
+        #day-tabs {
+            overflow-x: scroll;
+            -webkit-overflow-scrolling: touch;
+        }
+        #day-tabs::-webkit-scrollbar {
+            display: none;
         }
     </style>
     <!-- Firebase Imports -->
@@ -176,7 +185,8 @@
         </header>
 
         <!-- Day Selector Tabs -->
-        <nav id="day-tabs" class="flex flex-wrap justify-center space-x-2 md:space-x-4 mb-8 p-2 bg-white shadow-lg rounded-xl sticky top-0 z-10 border-b-4 border-orange-500"></nav>
+        <!-- Added overflow-x-scroll and space-x-2 for better mobile touch support -->
+        <nav id="day-tabs" class="flex justify-start md:justify-center space-x-2 md:space-x-4 mb-8 p-3 bg-white shadow-xl rounded-2xl sticky top-0 z-10 border-b-4 border-orange-500 overflow-x-scroll"></nav>
 
         <!-- Routine Display -->
         <main id="routine-container" class="space-y-6">
@@ -280,9 +290,9 @@
                 
                 const button = document.createElement('button');
                 button.textContent = day;
-                button.className = `py-2 px-4 rounded-full font-semibold transition-colors duration-200 shadow-sm text-sm md:text-base ${
+                button.className = `whitespace-nowrap py-2 px-4 rounded-xl font-semibold transition-colors duration-200 shadow-sm text-sm md:text-base ${
                     isSelected
-                        ? 'bg-orange-600 text-white shadow-md shadow-orange-300'
+                        ? 'bg-orange-600 text-white shadow-md shadow-orange-400 ring-2 ring-offset-2 ring-orange-500'
                         : isToday
                             ? 'bg-orange-100 text-orange-600 hover:bg-orange-200'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
@@ -325,7 +335,7 @@
 
             // 2. Add current day title and date
             const dateDisplay = document.createElement('p');
-            dateDisplay.className = 'text-center text-gray-500 font-medium mb-4';
+            dateDisplay.className = 'text-center text-gray-500 font-medium mb-6 text-lg';
             if (currentDay === new Date().toLocaleDateString('en-US', { weekday: 'long' })) {
                 dateDisplay.textContent = `Today is ${currentDay}: ${window.formatDate(new Date())}`;
             } else {
@@ -340,26 +350,28 @@
                 
                 const card = document.createElement('div');
                 card.id = `ex-${index}`;
-                card.className = `p-4 md:p-6 rounded-xl shadow-md transition-all duration-300 ${isCompleted ? 'exercise-card-done' : 'exercise-card-pending'} flex flex-col sm:flex-row justify-between items-start sm:items-center`;
+                card.className = `p-4 md:p-6 rounded-xl transition-all duration-300 ${isCompleted ? 'exercise-card-done' : 'exercise-card-pending'} flex flex-col md:flex-row justify-between items-start md:items-center`;
 
                 const contentDiv = document.createElement('div');
-                contentDiv.className = 'flex-grow mb-4 sm:mb-0';
+                contentDiv.className = 'flex-grow mb-4 md:mb-0';
 
                 const nameEl = document.createElement('h3');
-                nameEl.className = `text-xl font-bold ${isCompleted ? 'text-green-800' : 'text-gray-800'} flex items-center`;
-                nameEl.innerHTML = `${ex.name} ${ex.superset ? '<span class="ml-2 text-xs bg-orange-200 text-orange-700 px-2 py-0.5 rounded-full font-medium">Superset</span>' : ''}`;
-
-                const detailEl = document.createElement('p');
-                detailEl.className = 'text-gray-500 text-sm italic mt-1';
-                detailEl.textContent = ex.detail;
+                nameEl.className = `text-xl font-extrabold ${isCompleted ? 'text-green-800' : 'text-gray-800'} flex items-center mb-1`;
+                // Use a more distinct superset badge
+                nameEl.innerHTML = `${ex.name} ${ex.superset ? '<span class="ml-2 text-xs bg-orange-600 text-white px-2 py-0.5 rounded-full font-medium shadow-sm">SUPERSET</span>' : ''}`;
 
                 const metaDiv = document.createElement('div');
-                metaDiv.className = 'mt-2 text-sm space-y-1';
+                metaDiv.className = 'mt-2 text-sm space-y-1 text-gray-700';
                 metaDiv.innerHTML = `
-                    <p class="text-gray-600"><strong class="text-gray-700">Sets:</strong> ${ex.sets} | <strong class="text-gray-700">Reps:</strong> ${ex.reps}</p>
-                    <p class="text-gray-600"><strong class="text-gray-700">Equipment:</strong> ${ex.equipment}</p>
-                    <p class="text-gray-600"><strong class="text-gray-700">Focus:</strong> ${ex.focus}</p>
+                    <p><strong class="font-bold">Sets:</strong> ${ex.sets} | <strong class="font-bold">Reps:</strong> ${ex.reps}</p>
+                    <p><strong class="font-bold">Equipment:</strong> ${ex.equipment}</p>
+                    <p><strong class="font-bold">Focus:</strong> ${ex.focus}</p>
                 `;
+
+                const detailEl = document.createElement('p');
+                detailEl.className = 'text-gray-500 text-sm italic mt-3 border-t pt-2';
+                detailEl.textContent = ex.detail;
+
 
                 contentDiv.appendChild(nameEl);
                 contentDiv.appendChild(metaDiv);
@@ -370,26 +382,45 @@
                 // Checkbox for completion
                 if (currentDay !== 'Sunday') { // No tracking needed for rest day
                     const checkboxDiv = document.createElement('div');
-                    checkboxDiv.className = 'flex-shrink-0';
+                    checkboxDiv.className = 'flex-shrink-0 w-full md:w-auto mt-4 md:mt-0';
 
                     const checkbox = document.createElement('input');
                     checkbox.type = 'checkbox';
                     checkbox.checked = isCompleted;
-                    checkbox.className = 'h-6 w-6 text-orange-600 rounded border-gray-300 focus:ring-orange-500 cursor-pointer';
-                    checkbox.disabled = !window.isFirebaseReady; // Disable if tracking is unavailable
-                    checkbox.onchange = (e) => toggleCompletion(ex.name, e.target.checked, card);
+                    checkbox.id = `check-${index}`;
+                    checkbox.className = 'hidden'; // Hide default checkbox
 
                     const label = document.createElement('label');
-                    label.className = `inline-flex items-center space-x-2 p-2 rounded-lg bg-gray-50 transition duration-150 ${window.isFirebaseReady ? 'hover:bg-gray-100 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
-                    label.innerHTML = `<span class="text-sm font-medium ${isCompleted ? 'text-green-700' : 'text-gray-600'}">${isCompleted ? 'Completed!' : 'Mark Done'}</span>`;
-                    label.prepend(checkbox);
+                    label.htmlFor = `check-${index}`;
+                    // Styled as a large, easy-to-tap button/label
+                    label.className = `flex items-center justify-center space-x-2 py-3 px-6 rounded-xl font-bold transition duration-150 shadow-md w-full ${window.isFirebaseReady ? 'cursor-pointer' : 'opacity-50 cursor-not-allowed'}`;
+                    
+                    if (isCompleted) {
+                        label.classList.add('bg-green-600', 'text-white', 'hover:bg-green-700');
+                        label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Completed!</span>`;
+                    } else {
+                        label.classList.add('bg-orange-500', 'text-white', 'hover:bg-orange-600');
+                        label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
+                    }
+                    
+                    label.onclick = (e) => {
+                        // Prevent the label click from immediately triggering the checkbox change
+                        if (!window.isFirebaseReady) {
+                            e.preventDefault();
+                            return;
+                        }
+                        const newStatus = !checkbox.checked;
+                        toggleCompletion(ex.name, newStatus, card, checkbox, label);
+                    };
 
+                    checkboxDiv.appendChild(checkbox);
                     checkboxDiv.appendChild(label);
                     card.appendChild(checkboxDiv);
+
                 } else {
                     // Styling for Rest Day
                     card.classList.remove('exercise-card-pending');
-                    card.classList.add('bg-blue-100', 'border-blue-400', 'border-l-6');
+                    card.classList.add('bg-blue-100', 'border-blue-400', 'border-l-6', 'shadow-md');
                     nameEl.classList.remove('text-gray-800');
                     nameEl.classList.add('text-blue-800');
                 }
@@ -403,15 +434,17 @@
          * @param {string} name - Exercise name.
          * @param {boolean} isCompleted - New status.
          * @param {HTMLElement} cardEl - The card element to update visually.
+         * @param {HTMLInputElement} checkboxEl - The hidden checkbox element.
+         * @param {HTMLLabelElement} labelEl - The visual label element.
          */
-        function toggleCompletion(name, isCompleted, cardEl) {
-            // Update local state immediately for fast UI feedback
+        function toggleCompletion(name, isCompleted, cardEl, checkboxEl, labelEl) {
+            // 1. Update local state
             dailyProgress[name] = isCompleted;
+            checkboxEl.checked = isCompleted;
             
-            // Visual update logic
+            // 2. Visual update logic
             const nameEl = cardEl.querySelector('h3');
-            const labelSpan = cardEl.querySelector('label span');
-
+            
             if (isCompleted) {
                 cardEl.classList.remove('exercise-card-pending', 'bg-white');
                 cardEl.classList.add('exercise-card-done');
@@ -419,7 +452,9 @@
                     nameEl.classList.remove('text-gray-800');
                     nameEl.classList.add('text-green-800');
                 }
-                if (labelSpan) labelSpan.textContent = 'Completed!';
+                labelEl.classList.remove('bg-orange-500', 'hover:bg-orange-600');
+                labelEl.classList.add('bg-green-600', 'hover:bg-green-700');
+                labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Completed!</span>`;
 
             } else {
                 cardEl.classList.remove('exercise-card-done');
@@ -428,10 +463,12 @@
                     nameEl.classList.remove('text-green-800');
                     nameEl.classList.add('text-gray-800');
                 }
-                if (labelSpan) labelSpan.textContent = 'Mark Done';
+                labelEl.classList.remove('bg-green-600', 'hover:bg-green-700');
+                labelEl.classList.add('bg-orange-500', 'hover:bg-orange-600');
+                labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
             }
 
-            // Save to Firestore (async)
+            // 3. Save to Firestore (async)
             if (window.saveProgress) {
                 window.saveProgress(name, isCompleted);
             }
