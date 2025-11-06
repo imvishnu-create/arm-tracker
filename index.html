@@ -10,19 +10,26 @@
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #e5e7eb; /* Slightly darker light gray background */
+            background-color: #f3f4f6; /* Lighter background for better contrast */
             min-height: 100vh;
         }
         .exercise-card-done {
-            background-color: #ecfdf5; /* Very light mint green */
-            border-left: 6px solid #059669; /* Stronger green border */
-            opacity: 0.95;
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            background-color: #f0fdf4; /* Lightest green */
+            border-left: 8px solid #10b981; /* Strong green border */
+            box-shadow: 0 10px 15px -3px rgba(16, 185, 129, 0.1), 0 4px 6px -4px rgba(16, 185, 129, 0.1);
         }
         .exercise-card-pending {
             background-color: #ffffff; /* Crisp white for pending */
-            border-left: 6px solid #f97316; /* Orange border */
-            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+            border-left: 8px solid #f97316; /* Orange border */
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.05), 0 4px 6px -4px rgb(0 0 0 / 0.05);
+        }
+        /* Sticky header for fixed category and day tabs */
+        #sticky-header {
+            position: sticky;
+            top: 0;
+            z-index: 20;
+            background-color: #fff;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
         }
         /* Custom scrollbar for better mobile tab experience */
         #day-tabs {
@@ -54,16 +61,7 @@
         let auth = null;
         let userId = null;
 
-
-        /* * --- IMPORTANT: GUIDE FOR EXTERNAL HOSTING ---
-         * If you run this file directly in a browser (outside the Canvas),
-         * the Tracker is disabled because Firebase credentials are not available.
-         * * To enable tracking on your own website, you must:
-         * 1. Create your own **Firebase Project** (or use an existing one).
-         * 2. Replace the 'null' below with your actual Firebase config object:
-         * Example: { apiKey: "AIza...", authDomain: "...", projectId: "...", ... }
-         * (Get this config from your Firebase project settings).
-        */
+        // Configuration for external hosting
         const CUSTOM_FIREBASE_CONFIG = null; // <<< PASTE YOUR CONFIG OBJECT HERE IF SELF-HOSTING
 
         const firebaseConfig = firebaseConfigFromCanvas || CUSTOM_FIREBASE_CONFIG;
@@ -80,16 +78,10 @@
          * Initializes Firebase and authenticates the user.
          */
         async function initializeFirebase() {
-            // This is where the error message is triggered if Firebase is not configured.
             if (!firebaseConfig) {
                 console.warn("Firebase configuration is missing. Tracking will only be session-based (progress will not be saved).");
-                // Update the container to show the error message
                 const container = document.getElementById('routine-container');
-                if (container) {
-                    container.innerHTML = '<p class="text-orange-600 text-center p-4">Warning: Persistent tracking is disabled. Progress will only be saved for this session.</p>';
-                }
-                
-                // Still need to call renderApp so the routine content displays
+                if (container) { container.innerHTML = ''; }
                 window.renderApp(false); 
                 return;
             }
@@ -100,24 +92,17 @@
                 auth = getAuth(app);
                 setLogLevel('Debug');
 
-                // --- Authentication Strategy: Use Canvas Token if available, otherwise Anonymous Sign-in ---
                 if (initialAuthToken) {
-                    // Used in the secure Canvas environment
                     await signInWithCustomToken(auth, initialAuthToken);
                 } else {
-                    // Fallback to anonymous sign-in for external or locally hosted apps
-                    // NOTE: This requires your own Firebase project configured in CUSTOM_FIREBASE_CONFIG
                     await signInAnonymously(auth);
                 }
                 
                 userId = auth.currentUser?.uid || crypto.randomUUID();
                 console.log("Firebase initialized and user signed in:", userId);
 
-                // Expose auth object for use in renderApp
                 window.auth = auth;
-
-                // Start rendering the app after auth is ready
-                window.renderApp(true); // Pass true to indicate successful auth
+                window.renderApp(true); 
 
             } catch (error) {
                 console.error("Firebase Initialization or Sign-In Error:", error);
@@ -130,23 +115,25 @@
         }
 
         /**
-         * Gets the Firestore document path for today's progress.
+         * Gets the Firestore document path for today's progress, factoring in the routine category.
+         * @param {string} category - The selected routine category ('Home' or 'Travel').
          * @returns {import("firebase/firestore").DocumentReference}
          */
-        const getProgressDocRef = () => {
+        const getProgressDocRef = (category) => {
             if (!db || !userId) throw new Error("Database or User ID not initialized.");
             const todayDate = formatDate(new Date());
-            // Path: /artifacts/{appId}/users/{userId}/exercise_tracker/{date}
-            return doc(db, 'artifacts', appId, 'users', userId, 'exercise_tracker', todayDate);
+            // Path: /artifacts/{appId}/users/{userId}/exercise_tracker/{date}_{category}
+            return doc(db, 'artifacts', appId, 'users', userId, 'exercise_tracker', `${todayDate}_${category}`);
         };
 
         /**
          * Loads the completion status for today's exercises.
-         * @returns {Promise<Object>} Object mapping exercise name to completion status (boolean).
+         * @param {string} category - The selected routine category.
+         * @returns {Promise<Object>} Object mapping exercise key (e.g., 'Routine-Dumbbell Floor Press') to completion status (boolean).
          */
-        async function loadProgress() {
+        async function loadProgress(category) {
             try {
-                const docRef = getProgressDocRef();
+                const docRef = getProgressDocRef(category);
                 const docSnap = await getDoc(docRef);
 
                 if (docSnap.exists()) {
@@ -161,23 +148,22 @@
 
         /**
          * Saves the completion status for a specific exercise.
-         * @param {string} exerciseName
+         * @param {string} category - The selected routine category.
+         * @param {string} exerciseKey - The unique key (e.g., 'Routine-Dumbbell Floor Press').
          * @param {boolean} isCompleted
          */
-        async function saveProgress(exerciseName, isCompleted) {
+        async function saveProgress(category, exerciseKey, isCompleted) {
             try {
-                const docRef = getProgressDocRef();
+                const docRef = getProgressDocRef(category);
                 
-                // Use a nested object structure to update only the specific exercise status
                 const updateData = {
                     exercises: {
-                        [exerciseName]: isCompleted
+                        [exerciseKey]: isCompleted
                     }
                 };
 
-                // Use setDoc with merge: true to avoid overwriting the entire document
                 await setDoc(docRef, updateData, { merge: true });
-                console.log("Progress saved successfully for:", exerciseName);
+                console.log("Progress saved successfully for:", exerciseKey, "in category:", category);
             } catch (error) {
                 console.error("Error saving progress:", error);
             }
@@ -187,117 +173,224 @@
         window.saveProgress = saveProgress;
         window.loadProgress = loadProgress;
         window.formatDate = formatDate;
-        window.isFirebaseReady = false; // Flag to track readiness
-        window.auth = null; // Expose auth object
+        window.isFirebaseReady = false; 
+        window.auth = null; 
 
-        // --- Start the App ---
         initializeFirebase(); 
     </script>
 </head>
-<body class="bg-gray-50 min-h-screen">
+<body class="bg-gray-100 min-h-screen">
 
-    <div class="container mx-auto p-4 md:p-8 max-w-5xl">
-        <header class="text-center mb-8">
-            <h1 class="text-4xl font-extrabold text-orange-600 mb-2">🏆 Arm Specialization Routine</h1>
-            <p class="text-gray-500 font-medium text-lg">7-Day Tracking & Pull-Up Prep</p>
-            <div id="auth-status" class="text-sm text-gray-400 mt-2">Loading tracker...</div>
-        </header>
+    <!-- Sticky Header containing Category and Day Tabs -->
+    <div id="sticky-header">
+        <div class="container mx-auto max-w-7xl px-4 pt-4">
+            <header class="text-center mb-4">
+                <h1 class="text-3xl md:text-4xl font-extrabold text-orange-600 mb-1">💪 Arm Specialization Tracker</h1>
+                <p class="text-gray-500 font-medium text-md">7-Day Tracking: Home Dumbbells vs. Travel Mini Loops</p>
+                <div id="auth-status" class="text-xs text-gray-400 mt-1">Loading tracker...</div>
+            </header>
+            
+            <!-- Category Selector -->
+            <nav id="category-tabs" class="flex justify-center space-x-2 md:space-x-4 mb-4 pb-2"></nav>
 
-        <!-- Day Selector Tabs -->
-        <!-- Added overflow-x-scroll and space-x-2 for better mobile touch support -->
-        <nav id="day-tabs" class="flex justify-start md:justify-center space-x-2 md:space-x-4 mb-8 p-3 bg-white shadow-xl rounded-2xl sticky top-0 z-10 border-b-4 border-orange-500 overflow-x-scroll"></nav>
+            <!-- Day Selector Tabs -->
+            <nav id="day-tabs" class="flex justify-start md:justify-center space-x-2 pb-3"></nav>
+        </div>
+    </div>
+    <!-- End Sticky Header -->
 
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
         <!-- Routine Display -->
         <main id="routine-container" class="space-y-6">
-            <div class="text-center p-8">
-                <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
+            <div class="text-center p-12">
+                <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-orange-500 mx-auto"></div>
                 <p class="mt-4 text-gray-600">Loading routine data and connecting to tracker...</p>
             </div>
         </main>
 
-        <footer class="text-center mt-12 text-sm text-gray-400">
-            <p>Remember to maintain strict form and control the negative phase of each rep!</p>
+        <footer class="text-center mt-12 text-sm text-gray-400 border-t pt-4">
+            <p>Maintain strict form, prioritize the mind-muscle connection, and control the negative (eccentric) phase of every repetition.</p>
         </footer>
     </div>
 
    
     <script>
-        // --- Routine Data based on User Input ---
+        // --- Data Definitions ---
+
+        const WARM_UP_DATA = [
+            { name: "Arm Circles (Forward/Reverse)", sets: 2, reps: "30 sec each", equipment: "Bodyweight", focus: "Shoulder Mobility", detail: "**Start small and gradually increase the circle size** in both directions. Focus on smooth, continuous motion, not speed." },
+            { name: "Band Pull-Aparts", sets: 2, reps: "15-20", equipment: "Mini Loop (Light)", focus: "Rear Delts & Upper Back Activation", detail: "Hold the band with a shoulder-width grip (or around wrists). **Pull the band outwards to chest level, squeezing your shoulder blades together intensely.** Return slowly. Avoid shrugging your shoulders up." },
+            { name: "Triceps Band Pushdowns", sets: 2, reps: "15-20", equipment: "Mini Loop (Light)", focus: "Triceps Warm-up", detail: "**Loop the band around your hands and behind your back.** Push the ends of the band down until your arms are fully locked out. **Focus on contracting the triceps, keeping your elbows stationary.**" },
+            { name: "Wrist Rotations & Flexes", sets: 2, reps: "10 each direction", equipment: "Bodyweight", focus: "Wrist & Forearm Mobility", detail: "Perform **gentle, slow circles** with your wrists. Then, use your opposite hand to gently pull the working hand's fingers up (flexion stretch) and down (extension stretch)." },
+        ];
+
         const ROUTINE_DATA = {
-            "Monday": [
-                { name: "Dumbbell Floor Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Chest and Triceps", detail: "Lower the dumbbells slowly until your upper arms touch the floor. Explosively press straight up." },
-                { name: "Banded Push-ups", sets: 3, reps: "AMRAP", equipment: "Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Loop band across upper back. Lower your chest (controlled) and explosively press up." },
-                { name: "Seated Dumbbell Shoulder Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Anterior and Medial Deltoids", detail: "Sit tall. Press dumbbells directly overhead until arms are fully extended. Control the descent." },
-                { name: "Dumbbell Lateral Raises", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Medial (Side) Deltoid", detail: "Raise arms out to the sides until they are parallel to the floor. Slowly lower." },
-                { name: "Dumbbell Close-Grip Floor Press", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Inner Chest and Triceps", detail: "Lower the dumbbells with your elbows tucked tightly against your sides. Press straight up." },
-                { name: "Seated Dumbbell Triceps Extension", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Long head of the Triceps", detail: "Lower the dumbbell behind your head by bending only at the elbows. Extend arms fully overhead." },
-                { name: "Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back for a peak squeeze." },
-                { name: "Plank", sets: 3, reps: "60 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Maintain a straight line from head to heels. Brace your abs tightly." },
-            ],
-            "Tuesday": [
-                { name: "Dumbbell Bent-Over Row", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Lats and Upper Back", detail: "Hinge at hips. Pull dumbbells toward your chest, driving your elbows past your torso, squeezing your back." },
-                { name: "Dumbbell Single-Arm Row", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lats, Upper Back, and Core stability", detail: "Use support. Pull the dumbbell to your side. Lower it slowly." },
-                { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids and Rotator Cuff", detail: "Pull the band toward your face, driving your elbows back and out. Squeeze your shoulder blades." },
-                { name: "Dumbbell Reverse Fly", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Rear Deltoids and Upper Back", detail: "Hinge at hips. Lift arms out to the sides in a wide arc, squeezing your shoulder blades together." },
-                { name: "Dumbbell Shrugs", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Upper Trapezius (Traps)", detail: "Shrug your shoulders straight up toward your ears. Lower them slowly." },
-                { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "Curl the weights toward your shoulders, keeping your elbows pinned to your sides. Squeeze at the top.", superset: true },
-                { name: "A2: Hammer Curls", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
-                { name: "Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Sit, lean forward. Curl the weight up slowly, focusing entirely on flexing the bicep." },
-                { name: "Timed Dumbbell Holds", sets: 2, reps: "45-60 sec", equipment: "Dumbbells (10kg set)", focus: "Static Grip Strength", detail: "Simply hold the dumbbells straight down by your side for the specified duration." },
-                { name: "Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Flexion (Forearm Flexors)", detail: "Palms up. Sit, rest forearms on knees/bench. Let wrist drop fully, then curl weight up toward the ceiling." },
-                { name: "Reverse Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Extension (Forearm Extensors)", detail: "Palms down. Sit, rest forearms on knees/bench. Let wrist drop fully, then curl weight up toward the ceiling." },
-            ],
-            "Wednesday": [
-                { name: "Plank", sets: 3, reps: "60-90 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Maintain a straight line from head to heels. Brace your abs tightly." },
-                { name: "Russian Twists", sets: 3, reps: "15-20 (ea. side)", equipment: "Bodyweight/Dumbbells", focus: "Obliques", detail: "Sit, lean back slightly, and twist your torso to tap the floor on each side." },
-                { name: "Side Plank", sets: 3, reps: "30-45 sec (ea. side)", equipment: "Bodyweight", focus: "Obliques", detail: "Keep your body in a perfectly straight line." },
-                { name: "Leg Raises", sets: 3, reps: "15-20", equipment: "Bodyweight", focus: "Lower Abdominals", detail: "Raise your legs to perpendicular, then lower them slowly." },
-            ],
-            "Thursday": [
-                { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "Curl the weights toward your shoulders, keeping your elbows pinned. Squeeze at the top.", superset: true },
-                { name: "A2: Long Band Overhead Triceps Ext", sets: 4, reps: "12-15", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Lower hands behind head (standing on band). Powerfully extend arms to the ceiling.", superset: true },
-                { name: "B1: Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Sit, lean forward. Curl up slowly, focusing on flexing the bicep. Control the negative.", superset: true },
-                { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lower dumbbells toward temples/forehead, then extend back up.", superset: true },
-                { name: "C1: Hammer Curls", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
-                { name: "C2: Dumbbell Triceps Kickbacks", sets: 3, reps: "12-15 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back for a peak squeeze.", superset: true },
-                { name: "D1: Dumbbell Zottman Curl", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Biceps, Brachialis, and Forearms", detail: "Curl up (palms up). Rotate palms down. Slowly lower (palms down).", superset: true },
-                { name: "D2: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Curl the weights up, focusing on forearm tension.", superset: true },
-                { name: "Finisher A: Hand Gripper Squeeze", sets: 3, reps: "12-15 (ea. hand)", equipment: "Hand Gripper", focus: "Crush Grip Strength", detail: "Squeeze the handles together forcefully. Control the release." },
-                { name: "Finisher B: Dumbbell Rotations", sets: 3, reps: "15-20 (ea. arm)", equipment: "Dumbbell (5kg set)", focus: "Wrist Stabilizers", detail: "Hold dumbbell vertically (hammer grip). Slowly rotate thumb toward and away from your body." },
-                { name: "Finisher C: Farmer's Walk (Grip)", sets: 2, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip Strength and Forearms", detail: "Hold heavy dumbbells and walk for the specified duration." },
-            ],
-            "Friday": [
-                { name: "Dumbbell Goblet Squats", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Quads and Glutes", detail: "Squat down, keeping your chest up and driving your knees out." },
-                { name: "Dumbbell Lunges (each leg)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Quads, Glutes, and Stability", detail: "Step forward and lower your hips until both knees are bent at a 90-degree angle." },
-                { name: "Dumbbell Calf Raises", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Calves", detail: "Raise yourself up onto the balls of your feet, squeezing your calves hard at the top." },
-                { name: "Dumbbell Pullovers", sets: 3, reps: "10-12", equipment: "Dumbbell & Bench/Surface", focus: "Lats (Overhead Pull Simulation)", detail: "Lie on your back (perpendicular to a bench/stable surface). Lower dumbbell slowly behind your head, feeling a deep stretch in the lats. Pull it back up using your lats." },
-                { name: "Band Lateral Raises", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Medial (Side) Deltoid", detail: "Raise arms out to the sides until parallel to the floor, leading with the elbows. Control the band's return." },
-                { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids", detail: "Pull the band toward your face, driving your elbows back and out." },
-                { name: "Banded Push-ups", sets: 2, reps: "AMRAP", equipment: "Long Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Lower your chest (controlled) and explosively press up." },
-                { name: "Dumbbell Shrugs", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Trapezius", detail: "Shrug your shoulders straight up toward your ears." },
-            ],
-            "Saturday": [
-                { name: "A1: Alternating Dumbbell Bicep Curls", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Biceps (Full Contraction)", detail: "Curl one dumbbell at a time. Focus on the peak contraction and a controlled negative.", superset: true },
-                { name: "A2: Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Pin your elbow to your side. Extend your arm straight back until fully locked out for a peak squeeze.", superset: true },
-                { name: "B1: Hammer Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Curl the dumbbells up toward your shoulders, avoiding rotation.", superset: true },
-                { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lowering the dumbbells toward your temples/forehead, then extend back up.", superset: true },
-                { name: "C1: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Curl the weights up, focusing on the tension in your forearms and keeping the movement controlled.", superset: true },
-                { name: "C2: Long Band Overhead Triceps Ext", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Lower your hands behind your head (standing on band). Powerfully extend your arms to the ceiling.", superset: true },
-                { name: "Finisher: Farmer's Walk (Grip)", sets: 3, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip strength and Forearms", detail: "Hold heavy dumbbells and walk for the specified duration." },
-            ],
-            "Sunday": [
-                { name: "Rest", sets: 1, reps: "Full Day", equipment: "None", focus: "Recovery", detail: "Complete Rest or Active Recovery (Light walking, stretching). No heavy lifting." }
-            ]
+            "Home": {
+                "Monday": [
+                    { name: "Dumbbell Floor Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Chest and Triceps", detail: "Lie on the floor, feet flat, holding dumbbells directly over your chest (neutral grip). **Initiate the movement by tucking your elbows in at a 45-degree angle.** Lower the weights under control until your upper arms gently contact the floor. **Pause briefly.** Explosively drive the weights back up, focusing on triceps and chest contraction at the top." },
+                    { name: "Banded Push-ups", sets: 3, reps: "AMRAP", equipment: "Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Loop a long resistance band across your upper back, securing the ends in your hands. Perform a push-up, ensuring your chest touches the floor. **The band adds resistance, especially at the top (lockout) phase, maximizing triceps work.**" },
+                    { name: "Seated Dumbbell Shoulder Press", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Anterior and Medial Deltoids", detail: "Sit on a bench with back support. Press dumbbells directly overhead, allowing them to touch lightly at the top. **Do not fully lock out your elbows.** Control the descent for a three-second count to maintain tension." },
+                    { name: "Dumbbell Lateral Raises", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Medial (Side) Deltoid", detail: "Stand tall with a slight bend in your elbows. **Raise the arms out to the sides as if pouring water from a jug (pinkies slightly up)** until parallel to the floor. Focus on using the side deltoids, not the traps." },
+                    { name: "Dumbbell Close-Grip Floor Press", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Inner Chest and Triceps", detail: "Similar to the standard floor press, but keep the **dumbbells touching or extremely close together, and keep your elbows fully tucked against your sides.** This maximizes triceps recruitment." },
+                    { name: "Seated Dumbbell Triceps Extension", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Long head of the Triceps", detail: "Hold one heavy dumbbell overhead with both hands. **Lower the dumbbell behind your head by bending only at the elbows.** Keep the upper arms vertical and fixed. Extend the arms forcefully." },
+                    { name: "Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Hinge forward, supporting yourself with one hand on a bench. **Pin your working elbow tightly to your side.** Extend the arm straight back, achieving a full lockout and an intense peak squeeze in the triceps." },
+                    { name: "Plank", sets: 3, reps: "60 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Forearms on the floor, elbows under shoulders. **Brace your abs, glutes, and quads tightly to prevent hip sagging or lifting.** Maintain a straight line from head to heels." },
+                ],
+                "Tuesday": [
+                    { name: "Dumbbell Bent-Over Row", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Lats and Upper Back", detail: "Hinge at the hips with a flat back. Pull the dumbbells toward your lower chest/stomach. **Drive your elbows up and back, squeezing your shoulder blades together intensely.** Control the weight on the way down." },
+                    { name: "Dumbbell Single-Arm Row", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lats, Upper Back, and Core stability", detail: "Support yourself on a bench. Pull the dumbbell to your hip, not your shoulder. **Focus on initiating the pull with your back (lats) rather than your biceps.**" },
+                    { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids and Rotator Cuff", detail: "Anchor the band high. Pull the band towards your face, aiming for your forehead. **Drive your elbows back and flare them out.** Finish with an external rotation of the shoulder to hit the rear delts." },
+                    { name: "Dumbbell Reverse Fly", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Rear Deltoids and Upper Back", detail: "Hinge forward at the waist until your torso is nearly parallel to the floor. Lift the dumbbells out to the sides in a wide arc. **Keep the movement slow and controlled; this is not a heavy exercise.**" },
+                    { name: "Dumbbell Shrugs", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Upper Trapezius (Traps)", detail: "Hold dumbbells at your side. **Shrug your shoulders straight up toward your ears in a strict vertical line.** Do not roll the shoulders. Lower them slowly, feeling a stretch at the bottom." },
+                    { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "**Keep your elbows pinned tightly to your sides.** Curl the weights toward your shoulders, squeezing hard at the top. **Control the negative (eccentric) phase for maximum muscle damage.**", superset: true },
+                    { name: "A2: Hammer Curls", sets: 4, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Hold the dumbbells with a neutral grip (palms facing each other). Curl them up without twisting your wrists. **This targets the brachialis, which adds thickness to the arm.**", superset: true },
+                    { name: "Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Sit down, brace your elbow against your inner thigh. **Curl the weight slowly, focusing entirely on flexing the bicep to create the highest possible peak.** Control the descent rigidly." },
+                    { name: "Timed Dumbbell Holds", sets: 2, reps: "45-60 sec", equipment: "Dumbbells (10kg set)", focus: "Static Grip Strength", detail: "Simply hold the dumbbells straight down by your side for the specified duration. **This is an endurance challenge for your grip and forearms.**" },
+                    { name: "Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Flexion (Forearm Flexors)", detail: "Sit, rest forearms on your knees with palms up, allowing the wrists to hang fully. **Curl the weights up toward the ceiling using only your wrists.** Focus on a burning sensation.", superset: true },
+                    { name: "Reverse Wrist Curls (Superset)", sets: 3, reps: "15-20", equipment: "Dumbbell (5kg set)", focus: "Wrist Extension (Forearm Extensors)", detail: "Flip your hands so palms face down. **Extend the wrists upward.** This works the opposite side of the forearm for balanced development.", superset: true },
+                ],
+                "Wednesday": [
+                    { name: "Plank", sets: 3, reps: "60-90 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Keep your spine neutral, glutes tight, and abs braced. Imagine pulling your elbows toward your toes to engage the core maximally." },
+                    { name: "Russian Twists", sets: 3, reps: "15-20 (ea. side)", equipment: "Bodyweight/Dumbbells", focus: "Obliques", detail: "Lean back slightly and keep your core engaged. **Rotate from the torso, not just the arms.** Tap the floor beside you with the weight/hands on each side." },
+                    { name: "Side Plank", sets: 3, reps: "30-45 sec (ea. side)", equipment: "Bodyweight", focus: "Obliques", detail: "Rest on one forearm. **Lift your hips high, maintaining a straight line from ankle to shoulder.** Keep your body perpendicular to the floor." },
+                    { name: "Leg Raises", sets: 3, reps: "15-20", equipment: "Bodyweight", focus: "Lower Abdominals", detail: "Lie on your back, hands under your lower back for support. **Lower your legs very slowly, stopping just before they touch the floor.** Do not let your lower back arch off the floor." },
+                ],
+                "Thursday": [
+                    { name: "A1: Standing Bicep Curls", sets: 4, reps: "8-12", equipment: "Dumbbells", focus: "Biceps (long head)", detail: "Maintain perfect posture. **Limit any swinging or momentum.** Control the weight both on the way up and the way down for time under tension.", superset: true },
+                    { name: "A2: Long Band Overhead Triceps Ext", sets: 4, reps: "12-15", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Stand on the middle of the band. Hold the ends behind your head. **Press the band up until your arms are locked out.** This hits the long head, which comprises most of the triceps mass.", superset: true },
+                    { name: "B1: Concentration Curl", sets: 3, reps: "10-12 (ea. arm)", equipment: "Dumbbell", focus: "Bicep Peak and Isolation", detail: "Maximize the contraction. **Focus on squeezing the bicep muscle into a ball** at the top of the movement.", superset: true },
+                    { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lie on the floor. Lower the dumbbells toward your temples/forehead. **Extend powerfully, using your triceps to drive the weight.** Elbows should remain fixed.", superset: true },
+                    { name: "C1: Hammer Curls", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Execute the curl slowly. **Imagine you are holding a hammer**—keep your grip firm and neutral throughout.", superset: true },
+                    { name: "C2: Dumbbell Triceps Kickbacks", sets: 3, reps: "12-15 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Perfect form is critical. **If your elbow moves, the weight is too heavy.** Achieve a true lockout.", superset: true },
+                    { name: "D1: Dumbbell Zottman Curl", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Biceps, Brachialis, and Forearms", detail: "Curl up (supinated/palms up). At the top, **rotate your palms to face down (pronated)**. Slowly lower the weight with palms down to maximize forearm work.", superset: true },
+                    { name: "D2: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Hold the dumbbells with palms facing down. Curl the weight up. **This hits the muscles on top of your forearm (extensors), which are often neglected.**", superset: true },
+                    { name: "Finisher A: Hand Gripper Squeeze", sets: 3, reps: "12-15 (ea. hand)", equipment: "Hand Gripper", focus: "Crush Grip Strength", detail: "Squeeze the handles together forcefully and hold the contraction for one second. Control the release. This is for maximal crush strength." },
+                    { name: "Finisher B: Dumbbell Rotations", sets: 3, reps: "15-20 (ea. arm)", equipment: "Dumbbell (5kg set)", focus: "Wrist Stabilizers", detail: "Hold the dumbbell vertically (hammer grip). Slowly rotate your thumb toward and away from your body, using a small, controlled movement to challenge wrist stability." },
+                    { name: "Finisher C: Farmer's Walk (Grip)", sets: 2, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip Strength and Forearms", detail: "**Hold the heaviest dumbbells you can manage** and walk for the specified duration. Focus on keeping your shoulders back and posture upright." },
+                ],
+                "Friday": [
+                    { name: "Dumbbell Goblet Squats", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Quads and Glutes", detail: "Hold a single heavy dumbbell vertically against your chest. **Squat deep, pushing your knees out over your feet.** Keep your chest up throughout the movement." },
+                    { name: "Dumbbell Lunges (each leg)", sets: 3, reps: "10-12", equipment: "Dumbbells", focus: "Quads, Glutes, and Stability", detail: "Step forward and lower your back knee toward the ground (90-degree angles). **The knee should track over the mid-foot.** Drive up explosively through the front heel." },
+                    { name: "Dumbbell Calf Raises", sets: 3, reps: "15-20", equipment: "Dumbbells", focus: "Calves", detail: "Stand on a step or curb. Lower your heels below the step for a deep stretch. **Explode upward onto the balls of your feet, achieving a maximal peak contraction.** Lower slowly." },
+                    { name: "Dumbbell Pullovers", sets: 3, reps: "10-12", equipment: "Dumbbell & Bench/Surface", focus: "Lats (Overhead Pull Simulation)", detail: "Lie perpendicular to a bench. Hold the dumbbell with both hands. **Lower the weight in an arc behind your head, stretching the lats fully.** Pull it back up using your lats, keeping a slight bend in the elbows." },
+                    { name: "Band Lateral Raises", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Medial (Side) Deltoid", detail: "Stand on the band. Raise your arms out to the sides until parallel to the floor. **Use the band's accommodating resistance to maximize the burn at the top.**" },
+                    { name: "Band Face Pulls", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Rear Deltoids", detail: "Anchor high. Pull towards your face. **Focus on keeping the upper arm bone externally rotated** to best target the rear deltoids." },
+                    { name: "Banded Push-ups", sets: 2, reps: "AMRAP", equipment: "Long Band & Bodyweight", focus: "Chest and Triceps lock-out", detail: "Use the band across your back to add extra intensity, especially on the top half of the repetition." },
+                    { name: "Dumbbell Shrugs", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Trapezius", detail: "**Avoid tilting your head or bending your elbows.** Keep the movement strict, isolating the vertical shrug." },
+                ],
+                "Saturday": [
+                    { name: "A1: Alternating Dumbbell Bicep Curls", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Biceps (Full Contraction)", detail: "Curl one dumbbell at a time. **Use the non-working arm to reinforce mind-muscle connection** on the working arm. Focus on a deliberate, unhurried pace.", superset: true },
+                    { name: "A2: Dumbbell Triceps Kickbacks", sets: 4, reps: "10-12 (ea. arm)", equipment: "Dumbbells", focus: "Lateral and Medial Triceps heads", detail: "Ensure a **maximal, hard squeeze at the full extension** of the elbow.", superset: true },
+                    { name: "B1: Hammer Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Brachialis and Forearm flexors", detail: "Keep the neutral grip solid and **focus on flexing the muscle underneath the biceps.**", superset: true },
+                    { name: "B2: Dumbbell Triceps Press (on floor)", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "All three Triceps heads", detail: "Lower the weights to a point just above your temples. **Maintain control and avoid bouncing off the floor.**", superset: true },
+                    { name: "C1: Dumbbell Reverse Curls", sets: 3, reps: "12-15", equipment: "Dumbbells", focus: "Forearm extensor muscles", detail: "Control is key. **Slowing the descent will create an intense burning sensation** in the forearm.", superset: true },
+                    { name: "C2: Long Band Overhead Triceps Ext", sets: 3, reps: "15-20", equipment: "Long Band", focus: "Long head of the Triceps", detail: "Ensure the band is providing resistance throughout the entire range of motion by adjusting your stance.", superset: true },
+                    { name: "Finisher: Farmer's Walk (Grip)", sets: 3, reps: "45-60 sec", equipment: "Dumbbells", focus: "Max Grip strength and Forearms", detail: "This is a final test of grip endurance. **Breathe deeply and hold steady.**" },
+                ],
+                "Sunday": [
+                    { name: "Rest", sets: 1, reps: "Full Day", equipment: "None", focus: "Recovery", detail: "Complete Rest or **Active Recovery** (Light walking, stretching, foam rolling). No heavy lifting." }
+                ]
+            },
+            "Travel": {
+                "Monday": [ 
+                    { name: "Banded Push-ups (Hands Anchor)", sets: 4, reps: "AMRAP", equipment: "Mini Loop (Heavy) & Bodyweight", focus: "Chest, Front Delts & Triceps Lockout", detail: "**Anchor:** Place the loop across your upper back, securing the ends in the palms of your hands. **Motion:** Perform a standard push-up. The band provides increasing resistance as you press up, **maximizing triceps engagement during the lockout.**" },
+                    { name: "Mini Loop Lying Triceps Extension", sets: 4, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Long Head of Triceps", detail: "**Anchor:** Lie on your back, loop the band under both **feet** or one foot (for more resistance). Hold the band ends in your hands. **Motion:** Press the band up and slightly back over your head, focusing on bending only at the elbows (like a skull crusher). **Lock out forcefully at the top.**" },
+                    { name: "Mini Loop Shoulder Press (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "Shoulders (Full)", detail: "**Anchor:** Stand on the band with both **feet** (feet closer together increases tension). Hold the band ends at ear level. **Motion:** Press straight overhead. **Focus on keeping the core tight** to prevent lower back arching." },
+                    { name: "Mini Loop Lateral Raises (Foot Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light/Medium)", focus: "Side Delts (High Volume)", detail: "**Anchor:** Stand on the band with **one foot**. Hold the band end with the corresponding hand. **Motion:** Raise the arm out to the side until parallel to the floor, performing a high-volume set. **Use a quick concentric (up) and a slow, controlled eccentric (down).**" },
+                    { name: "Mini Loop Seated Row (Foot Anchor)", sets: 4, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "Lats and Mid Back", detail: "**Anchor:** Sit with legs extended, loop the heavy band around both **feet**. Hold the band ends in your hands. **Motion:** Pull back, **driving your elbows past your torso** and squeezing your shoulder blades together. Control the return." },
+                    { name: "Mini Loop Reverse Fly (Foot Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light)", focus: "Rear Delts and Rotator Cuff", detail: "**Anchor:** Stand on the band with both feet, then hinge forward at the hips (flat back). **Motion:** Lift the band ends out to the sides in a wide arc, squeezing the rear shoulder and upper back. **Movement must be slow and controlled.**" },
+                    { name: "Mini Loop Bicep Curls (Foot Anchor)", sets: 4, reps: "15-20", equipment: "Mini Loop (Medium/Heavy)", focus: "Biceps", detail: "**Anchor:** Stand on the band with one or both **feet**. Hold the band end with palms facing up (supinated). **Motion:** Curl up, keeping elbows tucked. **The resistance is maximal at the top of the curl, ensuring a maximal peak contraction.**" },
+                    { name: "Plank with Banded Knee Drive", sets: 3, reps: "60 sec total", equipment: "Mini Loop (Light) & Bodyweight", focus: "Core and Obliques", detail: "**Anchor:** Place a light band around your **ankles**. **Motion:** Perform a standard plank, then **slowly alternate driving one knee toward your chest against the band's resistance.** Maintain a flat back and stable hips." },
+                ],
+                "Tuesday": [
+                    { name: "Mini Loop Single-Arm Row (Foot Anchor)", sets: 4, reps: "15-20 (ea. arm)", equipment: "Mini Loop (Heavy)", focus: "Lats, Upper Back, and Core stability", detail: "**Anchor:** Loop the band under **one foot** and hold the band end with the corresponding hand. **Motion:** Perform a bent-over row, focusing on pulling your elbow high and back toward your hip. **Focus on initiating the pull with your back (lats).**" },
+                    { name: "Mini Loop Hammer Curls (Foot Anchor)", sets: 4, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Brachialis and Forearm flexors", detail: "**Anchor:** Stand on the band. Hold the band end with a neutral grip (palms facing each other). **Motion:** Curl up without rotating wrists. **The key here is continuous movement and high reps** to target the brachialis for arm thickness." },
+                    { name: "Mini Loop Lying Triceps Extension", sets: 4, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "All Triceps Heads", detail: "**Anchor:** Lie down, loop the band under both **feet**. Hold the band ends with hands above your head. **Motion:** Extend your arms from your elbow, performing a 'skull-crusher' movement. **Control the negative phase deeply.**" },
+                    { name: "Mini Loop Concentration Curls", sets: 3, reps: "15-20 (ea. arm)", equipment: "Mini Loop (Medium)", focus: "Bicep Peak and Isolation", detail: "**Anchor:** Kneel down, loop the band under **one knee**. Brace your elbow against your inner thigh. **Motion:** Curl the weight slowly, focusing entirely on flexing the bicep to create the highest possible peak. **Maximize the muscle squeeze.**" },
+                    { name: "Mini Loop Reverse Curls (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Light)", focus: "Forearm extensor muscles", detail: "**Anchor:** Stand on the band. Hold the band ends with palms facing **down** (pronated grip). **Motion:** Curl up. **Ensure your wrist remains straight, letting the muscles on top of the forearm do all the work.**" },
+                    { name: "Mini Loop Wrist Curls (Knee Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light)", focus: "Wrist Flexion (Forearm Flexors)", detail: "**Anchor:** Kneel, rest forearms on knees with palms up, looping the band under your **hands**. **Motion:** Curl the wrists up toward the ceiling. **Use high reps to induce a deep burn** in the forearm flexors (underside)." },
+                    { name: "Mini Loop Reverse Wrist Curls (Knee Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light)", focus: "Wrist Extension (Forearm Extensors)", detail: "**Anchor:** Same as above, but with palms facing **down**. **Motion:** Extend the wrists upward. **This is crucial for preventing imbalances.** Focus on the extensors (top side)." },
+                ],
+                "Wednesday": [
+                    { name: "Plank", sets: 3, reps: "60-90 sec", equipment: "Bodyweight", focus: "Core stability", detail: "Keep your spine neutral, glutes tight, and abs braced. Imagine pulling your elbows toward your toes to engage the core maximally." },
+                    { name: "Banded Russian Twists", sets: 3, reps: "15-20 (ea. side)", equipment: "Mini Loop (Heavy)", focus: "Obliques and Core Rotation", detail: "**Anchor:** Sit on the floor, loop the heavy band around both **feet**. Hold the band end taut. **Motion:** Lean back slightly and rotate from the torso, tapping the band end on the floor beside you on each side. **Keep your feet planted**." },
+                    { name: "Copenhagen Side Plank", sets: 3, reps: "30-45 sec (ea. side)", equipment: "Bodyweight/Surface", focus: "Obliques (Adductor Focus)", detail: "Use a stable surface (bed, chair) to support your top leg. **Lift your bottom leg and hips off the floor, forming a straight line.** This powerfully hits the inner thigh and obliques." },
+                    { name: "Flutter Kicks", sets: 3, reps: "60 sec", equipment: "Bodyweight", focus: "Lower Abs and Hip Flexors", detail: "Lie on your back, slightly lift your head/shoulders. **Perform small, rapid scissor kicks with your legs.** Do not let your lower back arch; press it into the floor." },
+                    { name: "Banded Crunch (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "Upper Abdominals", detail: "**Anchor:** Lie on your back, loop the heavy band under both **feet**. Hold the band end behind your neck or on your chest. **Motion:** Perform a crunch, driving your chest toward your knees against the band's resistance. **Avoid pulling with your neck.**" },
+                ],
+                "Thursday": [
+                    { name: "A1: Mini Loop Bicep Curls (Foot Anchor)", sets: 4, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Biceps", superset: true, detail: "**Anchor:** Stand on the band with both feet. **Motion:** Curl the band up. Ensure your **feet are centered on the band** and your elbows do not move forward or back." },
+                    { name: "A2: Mini Loop Lying Triceps Extension", sets: 4, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Long Head of Triceps", superset: true, detail: "**Anchor:** Lie down, loop the band under both **feet**. **Motion:** Perform with full range of motion over your head. **Achieve a brief pause at the lockout** for maximal triceps recruitment." },
+                    { name: "B1: Mini Loop Hammer Curls (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Brachialis and Forearm flexors", superset: true, detail: "**Anchor:** Stand on the band. **Motion:** Keep the neutral grip. **Imagine pulling your thumbs toward your shoulders** instead of your pinkies." },
+                    { name: "B2: Mini Loop Banded Push-ups (Hands Anchor)", sets: 3, reps: "AMRAP", equipment: "Mini Loop (Heavy) & Bodyweight", focus: "Chest and Triceps lockout", superset: true, detail: "**Anchor:** Loop the band across your upper back, securing the ends in the palms of your hands. **Motion:** Push up forcefully. **The resistance is heaviest at the top, forcing a strong triceps lockout.**" },
+                    { name: "C1: Mini Loop Zottman Curl (Foot Anchor)", sets: 3, reps: "12-15", equipment: "Mini Loop (Light/Medium)", focus: "Biceps, Brachialis, and Forearms", superset: true, detail: "**Anchor:** Stand on the band. **Motion:** Curl up (palms up). At the top, **rotate your palms to face down (pronated)**. Lower slowly with the palms down to crush the forearm extensors." },
+                    { name: "C2: Mini Loop Reverse Grip Extension (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Light)", focus: "Forearm Extensors (Triceps Focus)", superset: true, detail: "**Anchor:** Stand on the band. Hold the band end with an underhand (supinated) grip. **Motion:** Extend the arm back (like a kickback). **This unique variation puts stress on the forearms** while still working the triceps." },
+                    { name: "Forearm Finisher: Band Wrist Curls (Knee Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light)", focus: "Wrist Flexors/Extensors", detail: "**Anchor:** Kneel, rest forearms on knees, looping the band under your **hands**. **Instructions:** Perform 20 wrist curls (palms up), immediately flip and do 20 reverse wrist curls (palms down)—that counts as one set. No rest." },
+                    { name: "Finisher: Banded Static Hold (Curl Position)", sets: 2, reps: "45-60 sec", equipment: "Mini Loop (Heavy)", focus: "Static Bicep Strength", detail: "**Anchor:** Stand on the band. **Hold the curl at the halfway point (90-degrees)** where the tension from the band is typically highest. Fight the urge to lower the band." },
+                ],
+                "Friday": [
+                    { name: "Mini Loop Squats (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "Quads and Glutes", detail: "**Anchor:** Stand on the band, crossing the ends over your chest or holding them at your shoulders. **Motion:** Squat deeply. **Actively push your knees outward against the band tension** to maximize glute engagement." },
+                    { name: "Mini Loop Lunges (each leg - Foot Anchor)", sets: 3, reps: "12-15", equipment: "Mini Loop (Heavy)", focus: "Quads, Glutes, and Stability", detail: "**Anchor:** Step on the band with your **front foot** and hold the ends. **Motion:** Lunge forward, maintain a stable torso and **push through the heel of your front foot** to return to standing." },
+                    { name: "Calf Raises (Single Leg)", sets: 3, reps: "20-25 (ea. leg)", equipment: "Bodyweight/Edge", focus: "Calves", detail: "Use a step or ledge for deep stretch. **Perform the movement on one leg to increase intensity.** Achieve max contraction at the top." },
+                    { name: "Mini Loop Pullovers (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Heavy)", focus: "Lats (Overhead Pull Simulation)", detail: "**Anchor:** Lie perpendicular to your feet (which anchor the band). Hold the band end behind your head with both hands. **Motion:** Pull the band up and forward over your chest, keeping a slight bend in the elbows. **Feel the lats engage.**" },
+                    { name: "Mini Loop Lateral Raises (Foot Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light/Medium)", focus: "Medial (Side) Deltoid", detail: "**Anchor:** Stand on the band with **one foot**. **Motion:** High reps for maximum time under tension and blood flow. **Focus on mind-muscle connection, not load.**" },
+                    { name: "Mini Loop Reverse Fly (Foot Anchor)", sets: 3, reps: "20-25", equipment: "Mini Loop (Light)", focus: "Rear Deltoids", detail: "**Anchor:** Stand on the band, hinge forward. **Motion:** Lift arms out and back. **Slow the eccentric (return) phase to 2-3 seconds.**" },
+                    { name: "Push-ups (Elevated/Decline)", sets: 2, reps: "AMRAP", equipment: "Bodyweight/Surface", focus: "Chest and Triceps lock-out", detail: "Elevate your feet on a chair (decline) for a harder exercise or elevate your hands on a bench (incline) for an easier variation." },
+                ],
+                "Saturday": [
+                    { name: "A1: Mini Loop Alternating Bicep Curls (Foot Anchor)", sets: 4, reps: "15-20 (ea. arm)", equipment: "Mini Loop (Medium)", focus: "Biceps (Full Contraction)", detail: "**Anchor:** Stand on the band with both feet. **Motion:** Curl one arm at a time. **This allows you to rest one arm briefly while the other is working, ensuring high intensity.**", superset: true },
+                    { name: "A2: Mini Loop Triceps Kickbacks (Foot Anchor)", sets: 4, reps: "15-20 (ea. arm)", equipment: "Mini Loop (Light)", focus: "Lateral and Medial Triceps heads", detail: "**Anchor:** Loop the band under your **foot** and hold the end with the working hand. **Motion:** Pin the elbow to your side and drive the forearm back for a full lockout. **Ensure a maximal, hard squeeze.**", superset: true },
+                    { name: "B1: Mini Loop Reverse Curls (Foot Anchor)", sets: 3, reps: "15-20", equipment: "Mini Loop (Light)", focus: "Forearm extensor muscles", detail: "**Anchor:** Stand on the band, palms down. **Motion:** Curl up. **Do not let your wrists flex or extend; keep them straight.**", superset: true },
+                    { name: "B2: Mini Loop Lying Triceps Extension", sets: 3, reps: "15-20", equipment: "Mini Loop (Medium)", focus: "Long head of the Triceps", detail: "**Anchor:** Lie down, loop the band under both **feet**. **Motion:** Extend arms over head. **Keep your upper arms parallel**—avoid letting your elbows flare too wide.", superset: true },
+                    { name: "Finisher: Band Static Grip Hold", sets: 3, reps: "45-60 sec", equipment: "Mini Loop (Heavy)", focus: "Max Grip strength and Forearms", detail: "Hold the band in your hand and **squeeze it as tightly as possible** for the specified time. **This is a static, isometric hold** to tax the crushing grip and forearms." },
+                ],
+                "Sunday": [
+                    { name: "Rest", sets: 1, reps: "Full Day", equipment: "None", focus: "Recovery", detail: "Complete Rest or **Active Recovery** (Light stretching, mobility work, low-impact cardio). Give your joints and muscles time to rebuild." }
+                ]
+            }
         };
 
+        // --- State Variables ---
+        let currentCategory = 'Home'; // Default to Home
         let currentDay = new Date().toLocaleDateString('en-US', { weekday: 'long' });
         let dailyProgress = {};
 
+        // --- Core Functions ---
+
         /**
-         * Renders the tab navigation buttons.
+         * Renders the category selection buttons (Home/Travel).
+         */
+        function renderCategorySelector() {
+            const categories = Object.keys(ROUTINE_DATA);
+            const tabsContainer = document.getElementById('category-tabs');
+            tabsContainer.innerHTML = '';
+
+            categories.forEach(category => {
+                const isSelected = category === currentCategory;
+                const button = document.createElement('button');
+                button.textContent = `${category} Routine`;
+                button.className = `py-2 px-6 rounded-xl font-bold transition-colors duration-200 shadow-lg text-base ${
+                    isSelected
+                        ? 'bg-orange-600 text-white shadow-orange-400'
+                        : 'bg-gray-200 text-gray-700 hover:bg-orange-100 hover:text-orange-600'
+                }`;
+                button.onclick = () => {
+                    if (currentCategory !== category) {
+                        currentCategory = category;
+                        renderCategorySelector(); // Update category selection visuals
+                        renderTabs(); // Update day tabs based on new category
+                        renderRoutine(); // Load the new routine
+                    }
+                };
+                tabsContainer.appendChild(button);
+            });
+        }
+        
+        /**
+         * Renders the tab navigation buttons for days.
          */
         function renderTabs() {
-            const days = Object.keys(ROUTINE_DATA);
+            const days = Object.keys(ROUTINE_DATA[currentCategory]);
             const tabsContainer = document.getElementById('day-tabs');
             tabsContainer.innerHTML = '';
 
@@ -309,7 +402,7 @@
                 
                 const button = document.createElement('button');
                 button.textContent = day;
-                button.className = `whitespace-nowrap py-2 px-4 rounded-xl font-semibold transition-colors duration-200 shadow-sm text-sm md:text-base ${
+                button.className = `whitespace-nowrap py-2 px-4 rounded-xl font-semibold transition-colors duration-200 text-sm md:text-base ${
                     isSelected
                         ? 'bg-orange-600 text-white shadow-md shadow-orange-400 ring-2 ring-offset-2 ring-orange-500'
                         : isToday
@@ -319,143 +412,165 @@
                 button.onclick = () => {
                     currentDay = day;
                     renderRoutine();
-                    renderTabs(); // Re-render to update the active state
+                    renderTabs(); 
                 };
                 tabsContainer.appendChild(button);
             });
+            // Ensure the current day tab is visible by scrolling the container
+            if (tabsContainer.querySelector('.bg-orange-600')) {
+                tabsContainer.querySelector('.bg-orange-600').scrollIntoView({ behavior: 'smooth', inline: 'center' });
+            }
+        }
+        
+        /**
+         * Renders a single exercise card.
+         * @param {Object} ex - Exercise object.
+         * @param {string} uniqueKey - Unique key for tracking (e.g., 'Warmup-Arm Circles').
+         * @param {HTMLElement} container - The container element to append to.
+         */
+        function renderExerciseCard(ex, uniqueKey, container) {
+            const isCompleted = dailyProgress[uniqueKey] || false;
+            
+            const card = document.createElement('div');
+            card.id = `card-${uniqueKey}`;
+            card.className = `p-4 md:p-6 rounded-2xl transition-all duration-300 ${isCompleted ? 'exercise-card-done' : 'exercise-card-pending'} flex flex-col`;
+
+            const headerDiv = document.createElement('div');
+            headerDiv.className = 'flex justify-between items-start md:items-center mb-4';
+            
+            const nameDiv = document.createElement('div');
+            const nameEl = document.createElement('h3');
+            nameEl.className = `text-xl font-extrabold ${isCompleted ? 'text-green-800' : 'text-gray-900'} flex items-center mb-1`;
+            nameEl.innerHTML = `${ex.name} ${ex.superset ? '<span class="ml-2 text-xs bg-orange-600 text-white px-2 py-0.5 rounded-full font-medium shadow-sm">SUPERSET</span>' : ''}`;
+            nameDiv.appendChild(nameEl);
+
+            const metaDiv = document.createElement('div');
+            metaDiv.className = 'flex flex-wrap text-sm space-x-4 md:space-x-6 text-gray-700 font-medium';
+            metaDiv.innerHTML = `
+                <p><strong class="font-extrabold">Sets:</strong> ${ex.sets}</p>
+                <p><strong class="font-extrabold">Reps:</strong> ${ex.reps}</p>
+                <p><strong class="font-extrabold">Equipment:</strong> ${ex.equipment}</p>
+                <p class="text-orange-600"><strong class="font-extrabold">Focus:</strong> ${ex.focus}</p>
+            `;
+            nameDiv.appendChild(metaDiv);
+            headerDiv.appendChild(nameDiv);
+
+            // Checkbox for completion (only for non-rest days)
+            if (currentDay !== 'Sunday') {
+                const checkboxDiv = document.createElement('div');
+                checkboxDiv.className = 'flex-shrink-0 w-full md:w-auto mt-2 md:mt-0';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = isCompleted;
+                checkbox.id = `check-${uniqueKey}`;
+                checkbox.className = 'hidden'; 
+
+                const label = document.createElement('label');
+                label.htmlFor = `check-${uniqueKey}`;
+                label.className = `flex items-center justify-center space-x-2 py-2 px-4 rounded-lg font-bold transition duration-150 shadow-md w-full md:w-36 cursor-pointer text-sm`;
+                
+                if (isCompleted) {
+                    label.classList.add('bg-green-600', 'text-white', 'hover:bg-green-700');
+                    label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Done</span>`;
+                } else {
+                    label.classList.add('bg-orange-500', 'text-white', 'hover:bg-orange-600');
+                    label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
+                }
+                
+                label.onclick = () => {
+                    const newStatus = !checkbox.checked;
+                    toggleCompletion(uniqueKey, newStatus, card, checkbox, label);
+                };
+
+                checkboxDiv.appendChild(checkbox);
+                checkboxDiv.appendChild(label);
+                headerDiv.appendChild(checkboxDiv);
+            } else {
+                // Styling for Rest Day
+                card.classList.remove('exercise-card-pending');
+                card.classList.add('bg-blue-100', 'border-blue-500', 'border-l-8', 'shadow-md');
+                nameEl.classList.remove('text-gray-900');
+                nameEl.classList.add('text-blue-800');
+            }
+
+            card.appendChild(headerDiv);
+
+            // Detailed Instructions
+            const detailEl = document.createElement('div');
+            detailEl.className = 'mt-3 pt-3 border-t border-gray-200 text-gray-700 text-sm italic font-light';
+            detailEl.innerHTML = `<strong class="text-orange-600 not-italic">Execution:</strong> ${ex.detail}`;
+            card.appendChild(detailEl);
+
+            container.appendChild(card);
         }
 
         /**
-         * Renders the routine details for the selected day.
-         * @param {boolean} isReady - True if Firebase is initialized.
+         * Renders the routine details for the selected day and category.
          */
         async function renderRoutine() {
             const container = document.getElementById('routine-container');
             container.innerHTML = '';
-            const exercises = ROUTINE_DATA[currentDay] || [];
+            
+            // 1. Load progress
+            const loadingHtml = `
+                <div class="text-center p-12">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-orange-500 mx-auto"></div>
+                    <p class="mt-4 text-gray-600">Loading progress for ${currentCategory} routine...</p>
+                </div>
+            `;
+            container.innerHTML = loadingHtml;
 
-            // 1. Load progress for the current day, only if Firebase is ready
             if (window.isFirebaseReady && window.loadProgress) {
-                // Remove the spinner and show "Loading progress..." before the actual data loads
-                container.innerHTML = `
-                    <div class="text-center p-8">
-                        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto"></div>
-                        <p class="mt-4 text-gray-600">Loading progress...</p>
-                    </div>
-                `;
-                dailyProgress = await window.loadProgress();
-                container.innerHTML = ''; // Clear loading state once data is fetched
-
+                dailyProgress = await window.loadProgress(currentCategory);
             } else {
-                dailyProgress = {}; // Cannot load, use empty state
-                // If not ready, we rely on the initial loading message until the promise resolves.
-                // If the promise failed, initializeFirebase updates the error status.
+                // Local Storage Key includes Category
+                const todayKey = window.formatDate(new Date()) + '-' + currentCategory;
+                const localProgress = JSON.parse(localStorage.getItem(todayKey) || '{}');
+                dailyProgress = localProgress; 
             }
+            container.innerHTML = ''; // Clear loading state once data is fetched
 
             // 2. Add current day title and date
             const dateDisplay = document.createElement('p');
-            dateDisplay.className = 'text-center text-gray-500 font-medium mb-6 text-lg';
+            dateDisplay.className = 'text-center text-gray-500 font-bold mb-6 text-lg';
+            dateDisplay.textContent = `${currentCategory.toUpperCase()} ROUTINE: ${currentDay}`;
             if (currentDay === new Date().toLocaleDateString('en-US', { weekday: 'long' })) {
-                dateDisplay.textContent = `Today is ${currentDay}: ${window.formatDate(new Date())}`;
-            } else {
-                dateDisplay.textContent = `${currentDay} Routine`;
+                dateDisplay.textContent += ` (${window.formatDate(new Date())})`;
             }
             container.appendChild(dateDisplay);
 
 
-            // 3. Render exercises
-            exercises.forEach((ex, index) => {
-                const isCompleted = dailyProgress[ex.name] || false;
+            // 3. Render Warm-up Section
+            if (currentDay !== 'Sunday') {
+                const warmupTitle = document.createElement('h2');
+                warmupTitle.className = 'text-2xl font-extrabold text-orange-700 mt-6 mb-4 border-b-4 border-orange-300 pb-2 flex items-center';
+                warmupTitle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg><span>DAILY WARM-UP & ACTIVATION</span>`;
+                container.appendChild(warmupTitle);
                 
-                const card = document.createElement('div');
-                card.id = `ex-${index}`;
-                card.className = `p-4 md:p-6 rounded-xl transition-all duration-300 ${isCompleted ? 'exercise-card-done' : 'exercise-card-pending'} flex flex-col md:flex-row justify-between items-start md:items-center`;
+                WARM_UP_DATA.forEach((ex) => {
+                    renderExerciseCard(ex, `Warmup-${ex.name}`, container); 
+                });
 
-                const contentDiv = document.createElement('div');
-                contentDiv.className = 'flex-grow mb-4 md:mb-0';
-
-                const nameEl = document.createElement('h3');
-                nameEl.className = `text-xl font-extrabold ${isCompleted ? 'text-green-800' : 'text-gray-800'} flex items-center mb-1`;
-                // Use a more distinct superset badge
-                nameEl.innerHTML = `${ex.name} ${ex.superset ? '<span class="ml-2 text-xs bg-orange-600 text-white px-2 py-0.5 rounded-full font-medium shadow-sm">SUPERSET</span>' : ''}`;
-
-                const metaDiv = document.createElement('div');
-                metaDiv.className = 'mt-2 text-sm space-y-1 text-gray-700';
-                metaDiv.innerHTML = `
-                    <p><strong class="font-bold">Sets:</strong> ${ex.sets} | <strong class="font-bold">Reps:</strong> ${ex.reps}</p>
-                    <p><strong class="font-bold">Equipment:</strong> ${ex.equipment}</p>
-                    <p><strong class="font-bold">Focus:</strong> ${ex.focus}</p>
-                `;
-
-                const detailEl = document.createElement('p');
-                detailEl.className = 'text-gray-500 text-sm italic mt-3 border-t pt-2';
-                detailEl.textContent = ex.detail;
-
-
-                contentDiv.appendChild(nameEl);
-                contentDiv.appendChild(metaDiv);
-                contentDiv.appendChild(detailEl);
-
-                card.appendChild(contentDiv);
-
-                // Checkbox for completion
-                if (currentDay !== 'Sunday') { // No tracking needed for rest day
-                    const checkboxDiv = document.createElement('div');
-                    checkboxDiv.className = 'flex-shrink-0 w-full md:w-auto mt-4 md:mt-0';
-
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.checked = isCompleted;
-                    checkbox.id = `check-${index}`;
-                    checkbox.className = 'hidden'; // Hide default checkbox
-
-                    const label = document.createElement('label');
-                    label.htmlFor = `check-${index}`;
-                    // Changed: Removed the 'opacity-50 cursor-not-allowed' class dependency on Firebase readiness
-                    label.className = `flex items-center justify-center space-x-2 py-3 px-6 rounded-xl font-bold transition duration-150 shadow-md w-full cursor-pointer`;
-                    
-                    if (isCompleted) {
-                        label.classList.add('bg-green-600', 'text-white', 'hover:bg-green-700');
-                        label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Completed!</span>`;
-                    } else {
-                        label.classList.add('bg-orange-500', 'text-white', 'hover:bg-orange-600');
-                        label.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
-                    }
-                    
-                    label.onclick = () => {
-                        // Changed: Removed e.preventDefault() and return; based on Firebase status.
-                        // Now the button always calls toggleCompletion.
-                        const newStatus = !checkbox.checked;
-                        toggleCompletion(ex.name, newStatus, card, checkbox, label);
-                    };
-
-                    checkboxDiv.appendChild(checkbox);
-                    checkboxDiv.appendChild(label);
-                    card.appendChild(checkboxDiv);
-
-                } else {
-                    // Styling for Rest Day
-                    card.classList.remove('exercise-card-pending');
-                    card.classList.add('bg-blue-100', 'border-blue-400', 'border-l-6', 'shadow-md');
-                    nameEl.classList.remove('text-gray-800');
-                    nameEl.classList.add('text-blue-800');
-                }
-
-                container.appendChild(card);
+                const routineTitle = document.createElement('h2');
+                routineTitle.className = 'text-2xl font-extrabold text-orange-700 mt-8 mb-4 border-b-4 border-orange-300 pb-2 flex items-center';
+                routineTitle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m7 2h4m-4 0v-4m4 4v-4" /></svg><span>${currentDay} MAIN ROUTINE</span>`;
+                container.appendChild(routineTitle);
+            }
+            
+            // 4. Render Main Exercises
+            const exercises = ROUTINE_DATA[currentCategory][currentDay] || [];
+            exercises.forEach((ex) => {
+                renderExerciseCard(ex, `Routine-${ex.name}`, container);
             });
         }
 
         /**
-         * Toggles the completion status and updates Firestore.
-         * @param {string} name - Exercise name.
-         * @param {boolean} isCompleted - New status.
-         * @param {HTMLElement} cardEl - The card element to update visually.
-         * @param {HTMLInputElement} checkboxEl - The hidden checkbox element.
-         * @param {HTMLLabelElement} labelEl - The visual label element.
+         * Toggles the completion status and updates Firestore/Session Storage.
          */
-        function toggleCompletion(name, isCompleted, cardEl, checkboxEl, labelEl) {
+        function toggleCompletion(uniqueKey, isCompleted, cardEl, checkboxEl, labelEl) {
             // 1. Update local state
-            dailyProgress[name] = isCompleted;
+            dailyProgress[uniqueKey] = isCompleted;
             checkboxEl.checked = isCompleted;
             
             // 2. Visual update logic
@@ -465,55 +580,58 @@
                 cardEl.classList.remove('exercise-card-pending', 'bg-white');
                 cardEl.classList.add('exercise-card-done');
                 if (nameEl) {
-                    nameEl.classList.remove('text-gray-800');
+                    nameEl.classList.remove('text-gray-900');
                     nameEl.classList.add('text-green-800');
                 }
                 labelEl.classList.remove('bg-orange-500', 'hover:bg-orange-600');
                 labelEl.classList.add('bg-green-600', 'hover:bg-green-700');
-                labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Completed!</span>`;
+                labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" /></svg><span>Done</span>`;
 
             } else {
                 cardEl.classList.remove('exercise-card-done');
                 cardEl.classList.add('exercise-card-pending', 'bg-white');
                 if (nameEl) {
                     nameEl.classList.remove('text-green-800');
-                    nameEl.classList.add('text-gray-800');
+                    nameEl.classList.add('text-gray-900');
                 }
                 labelEl.classList.remove('bg-green-600', 'hover:bg-green-700');
                 labelEl.classList.add('bg-orange-500', 'hover:bg-orange-600');
                 labelEl.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg><span>Mark Done</span>`;
             }
 
-            // 3. Save to Firestore (async) - NOW ONLY RUNS IF isFirebaseReady is TRUE
+            // 3. Save to Persistent Firestore (async) - Key is based on currentCategory
             if (window.isFirebaseReady && window.saveProgress) {
-                window.saveProgress(name, isCompleted);
+                window.saveProgress(currentCategory, uniqueKey, isCompleted);
+                console.log(`[Persistent Tracking Active] Toggled ${uniqueKey}. Saved to Firestore.`);
             } else {
-                console.log(`[Session Tracking Active] Toggled ${name} to ${isCompleted}. Persistent save is disabled.`);
+                // 3b. Save to Session Storage (local only) - Key is based on currentCategory
+                const todayKey = window.formatDate(new Date()) + '-' + currentCategory;
+                let localProgress = JSON.parse(localStorage.getItem(todayKey) || '{}');
+                localProgress[uniqueKey] = isCompleted;
+                localStorage.setItem(todayKey, JSON.stringify(localProgress));
+                console.log(`[Session Tracking Active] Toggled ${uniqueKey}. Saved to Local Storage.`);
             }
         }
 
         /**
          * Main function to start the application after Firebase is ready.
-         * @param {boolean} isAuthenticated - Whether Firebase initialized successfully.
          */
         window.renderApp = (isAuthenticated = false) => {
             window.isFirebaseReady = isAuthenticated;
             const todayLong = new Date().toLocaleDateString('en-US', { weekday: 'long' });
             
-            // Set the initial day to today
             currentDay = todayLong;
             
-            // Update Auth Status display
             const authStatus = document.getElementById('auth-status');
             
             if (isAuthenticated && window.auth && window.auth.currentUser) {
                 const userId = window.auth.currentUser.uid;
                 authStatus.innerHTML = `Tracker <strong class="text-green-600">Active</strong> (User ID: <code class="bg-gray-200 p-1 rounded text-xs font-mono">${userId}</code>)`;
             } else {
-                // Modified status message to reflect that session tracking is now enabled
-                authStatus.innerHTML = `Tracker <strong class="text-red-500">Disabled</strong>. Progress is only saved for the current session.`;
+                authStatus.innerHTML = `Tracker <strong class="text-red-500">Disabled</strong>. Progress is saved only for the current session.`;
             }
             
+            renderCategorySelector();
             renderTabs();
             renderRoutine();
         };
